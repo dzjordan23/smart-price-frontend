@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getCompareResult, getPriceHistory } from '@/api/product'
+import { getCompareResult, getPriceHistory, createCompare } from '@/api/product'
 import { confirmPurchase } from '@/api/price'
 import { showToast } from 'vant'
 
@@ -15,7 +15,7 @@ const priceHistory = ref<any[]>([])
 const platforms = ref<any[]>([])
 const polling = ref<any>(null)
 
-// 模拟比价数据（开发阶段）
+// 模拟比价数据（开发阶段备用）
 const mockResult = {
   taskId: 'dev-001',
   status: 'completed',
@@ -25,39 +25,115 @@ const mockResult = {
     image: '',
   },
   prices: [
-    { id: 1, platform: '京东', price: 8999, originalPrice: 9999, discount: '满减优惠', finalPrice: 8649, couponInfo: '领券减350' },
-    { id: 2, platform: '淘宝', price: 9159, originalPrice: 9999, discount: '跨店满减', finalPrice: 8859, couponInfo: '88VIP再减300' },
-    { id: 3, platform: '拼多多', price: 8799, originalPrice: 9999, discount: '百亿补贴', finalPrice: 8599, couponInfo: '直降1400' },
+    { id: 1, platform: '京东', platformCode: 'jd', price: 8999, originalPrice: 9999, discount: '满减优惠', finalPrice: 8649, couponInfo: '领券减350', productUrl: '' },
+    { id: 2, platform: '淘宝', platformCode: 'taobao', price: 9159, originalPrice: 9999, discount: '跨店满减', finalPrice: 8859, couponInfo: '88VIP再减300', productUrl: '' },
+    { id: 3, platform: '拼多多', platformCode: 'pdd', price: 8799, originalPrice: 9999, discount: '百亿补贴', finalPrice: 8599, couponInfo: '直降1400', productUrl: '' },
   ],
 }
 
 onMounted(async () => {
-  const productId = route.query.productId
+  // 优先使用 taskId 查询比价结果（异步任务轮询模式）
+  const taskIdParam = route.query.taskId
+  const productIdParam = route.query.productId
+  const keywordParam = route.query.keyword
 
   try {
-    // 尝试真实 API
-    if (productId) {
-      const data: any = await getCompareResult(String(productId))
-      result.value = data
-      if (data?.status === 'pending') {
-        // 轮询等待结果
-        polling.value = setInterval(async () => {
-          const latest: any = await getCompareResult(String(productId))
-          if (latest?.status === 'completed') {
-            result.value = latest
-            clearInterval(polling.value)
-            loading.value = false
-          }
-        }, 3000)
-        return
+    if (taskIdParam) {
+      // 模式1: 使用 taskId 轮询比价结果
+      taskId.value = String(taskIdParam)
+      await pollCompareResult(taskId.value)
+    } else if (productIdParam) {
+      // 模式2: 使用 productId 查询已有比价结果
+      const data: any = await getCompareResult(String(productIdParam))
+      if (data?.status === 'processing') {
+        // 任务处理中，轮询
+        taskId.value = data.taskId || String(productIdParam)
+        await pollCompareResult(taskId.value)
+      } else if (data?.status === 'done') {
+        // 任务完成，直接显示结果
+        result.value = data
       }
+    } else if (keywordParam) {
+      // 模式3: 新建比价任务（关键词模式）
+      await startNewCompareTask(String(keywordParam))
+    } else {
+      // 无参数，使用 mock 数据
+      result.value = mockResult
     }
-  } catch {
-    // 开发模式：使用模拟数据
+  } catch (err: any) {
+    console.warn('API 调用失败，使用 mock 数据:', err.message)
     result.value = mockResult
   }
   loading.value = false
 })
+
+// 轮询比价结果
+async function pollCompareResult(tid: string) {
+  return new Promise<void>((resolve) => {
+    polling.value = setInterval(async () => {
+      try {
+        const data: any = await getCompareResult(tid)
+        if (data?.status === 'done') {
+          result.value = transformBackendResult(data)
+          clearInterval(polling.value)
+          loading.value = false
+          resolve()
+        } else if (data?.status === 'failed') {
+          clearInterval(polling.value)
+          loading.value = false
+          showToast('比价失败，请重试')
+          resolve()
+        }
+        // processing 状态继续轮询
+      } catch {
+        clearInterval(polling.value)
+        loading.value = false
+        resolve()
+      }
+    }, 3000)
+  })
+}
+
+// 创建新的比价任务
+async function startNewCompareTask(keyword: string) {
+  try {
+    const data: any = await createCompare({
+      productId: Number(route.query.productId) || 0,
+      platforms: ['jd', 'pdd', 'taobao', 'douyin'],
+    })
+    if (data?.taskId) {
+      taskId.value = data.taskId
+      await pollCompareResult(data.taskId)
+    } else {
+      result.value = mockResult
+    }
+  } catch {
+    result.value = mockResult
+  }
+}
+
+// 转换后端数据格式为前端期望格式
+function transformBackendResult(data: any) {
+  if (!data) return mockResult
+  return {
+    taskId: data.taskId || '',
+    status: 'completed',
+    product: data.product || { name: route.query.keyword || '商品', id: 0 },
+    prices: (data.results || []).map((r: any, idx: number) => ({
+      id: idx + 1,
+      platform: r.platformName || r.platform || '',
+      platformCode: r.platform || '',
+      price: r.finalPrice || r.salePrice || 0,
+      originalPrice: r.originalPrice || 0,
+      discount: r.promotion || '',
+      finalPrice: r.finalPrice || 0,
+      couponInfo: r.couponInfo?.type ? `${r.couponInfo.type}: ${r.couponInfo.amount}` : '',
+      productUrl: r.productUrl || '',
+      shopName: r.shopName || '',
+      isLowest: r.isLowest || false,
+    })),
+  }
+}
 
 onUnmounted(() => {
   if (polling.value) clearInterval(polling.value)
@@ -94,6 +170,23 @@ function savedAmount(item: any) {
   const orig = item.originalPrice || item.price
   const final = item.finalPrice || item.price
   return Math.max(0, orig - final)
+}
+
+// 跳转购买
+function goToBuy(item: any) {
+  if (item.productUrl) {
+    window.location.href = item.productUrl
+  } else {
+    // 构造平台搜索链接
+    const keyword = encodeURIComponent(result.value?.product?.name || '')
+    const platformUrls: Record<string, string> = {
+      jd: `https://search.jd.com/Search?keyword=${keyword}`,
+      taobao: `https://s.taobao.com/search?q=${keyword}`,
+      pdd: `https://mobile.yangkeduo.com/search_result.html?search_key=${keyword}`,
+      douyin: `https://v.douyin.com/search?keyword=${keyword}`,
+    }
+    window.location.href = platformUrls[item.platformCode] || platformUrls.jd
+  }
 }
 
 // 最低价高亮
@@ -163,7 +256,7 @@ const lowestPrice = computed(() => {
           round
           type="primary"
           class="buy-btn"
-          @click="handleBuy(item)"
+          @click="goToBuy(item)"
         >
           去购买
         </van-button>

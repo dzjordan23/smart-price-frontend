@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { showToast } from 'vant'
 
 const activeTab = ref(0)
 
@@ -62,7 +63,7 @@ const reviews = ref([
           </div>
         </div>
         <div class="float-btn">
-          <van-button type="primary" round icon="edit" size="small">发帖</van-button>
+          <van-button type="primary" round icon="edit" size="small" @click="showToast('发帖功能开发中')">发帖</van-button>
         </div>
       </van-tab>
 

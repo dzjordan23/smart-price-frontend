@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { getWatchList } from '@/api/price'
+import { ref } from 'vue'
+import { showConfirmDialog, showToast } from 'vant'
+import { getWatchList, deleteWatch } from '@/api/price'
 
 const list = ref<any[]>([])
 const loading = ref(false)
 const finished = ref(false)
+const refreshing = ref(false)
 const page = ref(1)
 
 const mockWatchList = [
@@ -17,7 +19,11 @@ async function onLoad() {
   try {
     const data: any = await getWatchList(page.value)
     const items = data?.items || data?.list || data || []
-    list.value.push(...items)
+    if (refreshing.value) {
+      list.value = items
+    } else {
+      list.value.push(...items)
+    }
     if (items.length < 20) finished.value = true
     page.value++
   } catch {
@@ -26,6 +32,32 @@ async function onLoad() {
     finished.value = true
   }
   loading.value = false
+  refreshing.value = false
+}
+
+async function onRefresh() {
+  refreshing.value = true
+  page.value = 1
+  finished.value = false
+  list.value = []
+  loading.value = true
+  await onLoad()
+}
+
+async function handleDelete(item: any) {
+  try {
+    await showConfirmDialog({
+      title: '删除提醒',
+      message: `确定要删除「${item.productName}」的降价提醒吗？`,
+    })
+    await deleteWatch(item.id)
+    list.value = list.value.filter(i => i.id !== item.id)
+    showToast({ message: '已删除', type: 'success' })
+  } catch {
+    // 开发模式：直接移除
+    list.value = list.value.filter(i => i.id !== item.id)
+    showToast({ message: '已删除（开发模式）', type: 'success' })
+  }
 }
 
 function getStatusTag(status: string) {
@@ -45,50 +77,59 @@ function priceDiff(item: any) {
     <h2 class="page-title gradient-text">降价提醒</h2>
     <p class="page-desc">实时监控商品价格，达到目标价自动通知</p>
 
-    <van-pull-refresh>
+    <van-pull-refresh v-model:refreshing="refreshing" @refresh="onRefresh">
       <van-list
         v-model:loading="loading"
         :finished="finished"
         finished-text="没有更多了"
         @load="onLoad"
       >
-        <div
-          v-for="item in list"
-          :key="item.id"
-          class="watch-item card"
-          @click="$router.push(`/product/${item.productId}`)"
-        >
-          <div class="watch-header">
-            <span class="product-name">{{ item.productName }}</span>
-            <van-tag v-bind="getStatusTag(item.status)" round size="small">
-              {{ getStatusTag(item.status).text }}
-            </van-tag>
-          </div>
+        <van-swipe-cell v-for="item in list" :key="item.id">
+          <div
+            class="watch-item card"
+            @click="$router.push(`/product/${item.productId}`)"
+          >
+            <div class="watch-header">
+              <span class="product-name">{{ item.productName }}</span>
+              <van-tag v-bind="getStatusTag(item.status)" round size="small">
+                {{ getStatusTag(item.status).text }}
+              </van-tag>
+            </div>
 
-          <div class="watch-prices">
-            <div class="price-block">
-              <span class="label">当前价</span>
-              <span class="price" :class="{ up: priceDiff(item) <= 0 }">
-                ¥{{ item.currentPrice }}
+            <div class="watch-prices">
+              <div class="price-block">
+                <span class="label">当前价</span>
+                <span class="price" :class="{ up: priceDiff(item) <= 0 }">
+                  ¥{{ item.currentPrice }}
+                </span>
+              </div>
+              <div class="price-arrow">→</div>
+              <div class="price-block">
+                <span class="label">目标价</span>
+                <span class="price target">¥{{ item.targetPrice }}</span>
+              </div>
+            </div>
+
+            <div class="watch-footer">
+              <span class="platform">📍 {{ item.platform }}</span>
+              <span v-if="priceDiff(item) <= 0" class="triggered-msg">
+                🎉 已达到目标价！
+              </span>
+              <span v-else class="diff-msg">
+                还差 ¥{{ priceDiff(item) }}
               </span>
             </div>
-            <div class="price-arrow">→</div>
-            <div class="price-block">
-              <span class="label">目标价</span>
-              <span class="price target">¥{{ item.targetPrice }}</span>
-            </div>
           </div>
-
-          <div class="watch-footer">
-            <span class="platform">📍 {{ item.platform }}</span>
-            <span v-if="priceDiff(item) <= 0" class="triggered-msg">
-              🎉 已达到目标价！
-            </span>
-            <span v-else class="diff-msg">
-              还差 ¥{{ priceDiff(item) }}
-            </span>
-          </div>
-        </div>
+          <template #right>
+            <van-button
+              square
+              type="danger"
+              text="删除"
+              class="delete-btn"
+              @click="handleDelete(item)"
+            />
+          </template>
+        </van-swipe-cell>
 
         <van-empty v-if="!loading && list.length === 0" description="暂无降价提醒" />
       </van-list>
@@ -115,6 +156,11 @@ function priceDiff(item: any) {
 
 .watch-item {
   margin-bottom: $spacing-md;
+}
+
+.delete-btn {
+  height: 100%;
+  border-radius: $radius-md;
 }
 
 .watch-header {
