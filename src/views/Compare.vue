@@ -98,17 +98,26 @@ async function pollCompareResult(tid: string) {
 async function startNewCompareTask(keyword: string) {
   try {
     const data: any = await createCompare({
-      productId: Number(route.query.productId) || 0,
+      keyword: keyword,
       platforms: ['jd', 'pdd', 'taobao', 'douyin'],
     })
     if (data?.taskId) {
       taskId.value = data.taskId
       await pollCompareResult(data.taskId)
+    } else if (data?.productId) {
+      // 如果后端直接返回了结果
+      const resultData: any = await getCompareResult(String(data.productId))
+      if (resultData?.status === 'done') {
+        result.value = transformBackendResult(resultData)
+      } else {
+        result.value = transformBackendResult(data)
+      }
     } else {
-      result.value = mockResult
+      showToast('比价任务创建失败')
     }
-  } catch {
-    result.value = mockResult
+  } catch (error: any) {
+    console.error('比价任务创建失败:', error)
+    showToast('比价任务创建失败，请重试')
   }
 }
 

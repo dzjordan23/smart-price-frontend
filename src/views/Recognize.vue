@@ -48,10 +48,10 @@ async function handleRecognize() {
       // 识别成功，跳转比价
       startCompare(data.productId)
     }
-  } catch {
-    // 开发阶段：模拟识别成功
-    recognizeResult.value = { productId: 1, name: keyword.value || '测试商品', category: '数码' }
-    showToast({ message: '识别成功（开发模式）', type: 'success' })
+  } catch (error: any) {
+    console.error('识别失败:', error)
+    showToast({ message: '识别失败，请重试或使用关键词搜索', type: 'fail' })
+    // 不使用 mock 数据，让用户知道真实情况
   } finally {
     recognizing.value = false
   }

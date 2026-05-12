@@ -15,7 +15,8 @@ function goSearch() {
     showToast('请输入商品名称')
     return
   }
-  router.push({ name: 'Recognize', query: { keyword: keyword.value } })
+  // 直接在当前页面搜索，而不是跳转
+  handleHotSearch(keyword.value)
 }
 
 function goRecognize() {
@@ -49,11 +50,15 @@ async function handleHotSearch(kw: string) {
           v-model="keyword"
           placeholder="搜索商品名称或拍一拍"
           shape="round"
+          :show-action="true"
           @search="goSearch"
           @click-left-icon="goRecognize"
         >
           <template #left-icon>
             <van-icon name="photograph" size="20" color="var(--color-primary)" />
+          </template>
+          <template #action>
+            <van-button type="primary" size="small" @click="goSearch">搜索</van-button>
           </template>
         </van-search>
       </div>
