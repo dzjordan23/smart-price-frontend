@@ -1,0 +1,111 @@
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #{$bg-primary};
+  --bg-secondary: #{$bg-secondary};
+  --bg-card: #{$bg-card};
+  --text-primary: #{$text-primary};
+  --text-secondary: #{$text-secondary};
+  --text-accent: #{$text-accent};
+  --color-primary: #{$color-primary};
+  --color-success: #{$color-success};
+  --color-danger: #{$color-danger};
+  --border-color: #{$border-color};
+}
+
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background-color: $bg-primary;
+  color: $text-primary;
+  font-size: $font-md;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+#app {
+  min-height: 100vh;
+  max-width: 480px;
+  margin: 0 auto;
+  position: relative;
+  background: linear-gradient(180deg, $bg-primary 0%, $bg-secondary 100%);
+  min-height: 100dvh;
+}
+
+a {
+  color: $color-primary;
+  text-decoration: none;
+}
+
+// 滚动条
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+// 通用卡片
+.card {
+  background: $bg-card;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  transition: all $transition-normal;
+
+  &:active {
+    transform: scale(0.98);
+    background: $bg-card-hover;
+  }
+}
+
+// 霓虹光效
+.glow-border {
+  border: 1px solid $border-glow;
+  box-shadow: $shadow-glow;
+}
+
+// 渐变文字
+.gradient-text {
+  background: linear-gradient(135deg, $color-primary, $color-secondary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+// 页面容器
+.page {
+  padding: $spacing-md;
+  padding-bottom: calc(80px + #{$safe-bottom});
+}
+
+// Vant 深色主题覆盖
+:root:root {
+  --van-background: #{$bg-primary};
+  --van-background-2: #{$bg-secondary};
+  --van-text-color: #{$text-primary};
+  --van-text-color-2: #{$text-secondary};
+  --van-text-color-3: #{$text-muted};
+  --van-border-color: #{$border-color};
+  --van-active-color: rgba(255, 255, 255, 0.05);
+  --van-nav-bar-background: transparent;
+  --van-nav-bar-title-text-color: #{$text-primary};
+  --van-nav-bar-icon-color: #{$text-primary};
+  --van-field-input-text-color: #{$text-primary};
+  --van-button-primary-background: #{$color-primary};
+  --van-button-primary-border-color: #{$color-primary};
+}

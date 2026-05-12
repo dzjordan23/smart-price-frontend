@@ -1,0 +1,75 @@
+// ============================================
+// 智选比价助手 - 深色科技风主题变量
+// ============================================
+
+// 背景色阶
+$bg-primary: #0a0e1a;
+$bg-secondary: #111827;
+$bg-card: rgba(26, 31, 54, 0.85);
+$bg-card-hover: rgba(36, 42, 72, 0.9);
+$bg-input: rgba(26, 31, 54, 0.6);
+$bg-glass: rgba(255, 255, 255, 0.05);
+
+// 文字色阶
+$text-primary: #e8eaf0;
+$text-secondary: #8b92a5;
+$text-muted: #5a6178;
+$text-accent: #00d4ff;
+
+// 主题色
+$color-primary: #00d4ff;
+$color-primary-dark: #0099cc;
+$color-primary-glow: rgba(0, 212, 255, 0.3);
+$color-secondary: #6366f1;
+$color-success: #10b981;
+$color-warning: #f59e0b;
+$color-danger: #ef4444;
+
+// 涨跌色（中国股市惯例）
+$color-up: #ef4444;     // 涨/红
+$color-down: #10b981;   // 跌/绿
+$color-flat: #8b92a5;   // 平
+
+// 平台色
+$platform-jd: #e4393c;
+$platform-tb: #ff5722;
+$platform-pdd: #e02e24;
+
+// 边框
+$border-color: rgba(255, 255, 255, 0.08);
+$border-glow: rgba(0, 212, 255, 0.2);
+
+// 圆角
+$radius-sm: 8px;
+$radius-md: 12px;
+$radius-lg: 16px;
+$radius-xl: 24px;
+
+// 阴影
+$shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
+$shadow-glow: 0 0 20px rgba(0, 212, 255, 0.15);
+$shadow-glow-strong: 0 0 40px rgba(0, 212, 255, 0.25);
+
+// 间距
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 16px;
+$spacing-lg: 24px;
+$spacing-xl: 32px;
+
+// 动画
+$transition-fast: 0.15s ease;
+$transition-normal: 0.3s ease;
+$transition-slow: 0.5s ease;
+
+// 字号
+$font-xs: 10px;
+$font-sm: 12px;
+$font-md: 14px;
+$font-lg: 16px;
+$font-xl: 20px;
+$font-xxl: 24px;
+$font-title: 28px;
+
+// 安全区域
+$safe-bottom: env(safe-area-inset-bottom, 0px);
