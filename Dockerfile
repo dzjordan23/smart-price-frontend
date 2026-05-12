@@ -19,11 +19,11 @@ RUN npm run build
 # 安装 serve 用于生产环境
 RUN npm install -g serve
 
-# Railway 会注入 PORT 环境变量，默认使用 8080
+# Railway 会注入 PORT 环境变量
 ENV PORT=8080
 
 # 暴露端口
-EXPOSE 8080
+EXPOSE $PORT
 
-# 启动命令 - serve 监听所有接口 (0.0.0.0)
-CMD ["sh", "-c", "serve dist -s -l 0.0.0.0 -p ${PORT:-8080}"]
+# 启动命令 - 监听 0.0.0.0 让 Railway 可以访问
+CMD serve dist -s -l "0.0.0.0:$PORT"
