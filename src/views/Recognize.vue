@@ -65,6 +65,8 @@ async function startCompare(productId: number) {
 
 <template>
   <div class="page recognize-page">
+    <van-nav-bar title="商品识别" left-arrow :border="false" class="nav-bar" @click-left="$router.back()" />
+
     <h2 class="page-title gradient-text">商品识别</h2>
     <p class="page-desc">拍照或输入商品名称，AI 智能识别并全网比价</p>
 
@@ -135,7 +137,11 @@ async function startCompare(productId: number) {
 
 <style lang="scss" scoped>
 .recognize-page {
-  padding-top: 24px;
+  padding-top: 8px;
+}
+
+.nav-bar {
+  margin: (-$spacing-md) (-$spacing-md) $spacing-md;
 }
 
 .page-title {
@@ -145,7 +151,7 @@ async function startCompare(productId: number) {
 }
 
 .page-desc {
-  color: $text-secondary;
+  color: var(--text-secondary);
   font-size: $font-md;
   margin-bottom: $spacing-xl;
 }
@@ -169,7 +175,7 @@ async function startCompare(productId: number) {
 }
 
 .upload-hint {
-  color: $text-secondary;
+  color: var(--text-secondary);
   font-size: $font-sm;
   margin-top: $spacing-md;
 }
@@ -186,9 +192,9 @@ async function startCompare(productId: number) {
   height: 50px;
   font-size: $font-lg;
   font-weight: 600;
-  background: linear-gradient(135deg, $color-primary, $color-secondary);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   border: none;
-  box-shadow: $shadow-glow;
+  box-shadow: 0 0 20px var(--color-primary-glow);
   margin-bottom: $spacing-xl;
 }
 
@@ -196,7 +202,7 @@ async function startCompare(productId: number) {
   h4 {
     font-size: $font-lg;
     margin-bottom: $spacing-md;
-    color: $color-primary;
+    color: var(--color-primary);
   }
 }
 
@@ -208,14 +214,14 @@ async function startCompare(productId: number) {
   display: flex;
   justify-content: space-between;
   padding: $spacing-sm 0;
-  border-bottom: 1px solid $border-color;
+  border-bottom: 1px solid var(--border-color);
 
-  .label { color: $text-secondary; }
-  .value { color: $text-primary; font-weight: 500; }
+  .label { color: var(--text-secondary); }
+  .value { color: var(--text-primary); font-weight: 500; }
 }
 
 .compare-btn {
-  background: linear-gradient(135deg, $color-primary, $color-secondary);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   border: none;
 }
 </style>

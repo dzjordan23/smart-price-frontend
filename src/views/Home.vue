@@ -69,9 +69,9 @@ async function handleHotSearch(kw: string) {
         <div class="action-icon">🔔</div>
         <span>降价提醒</span>
       </div>
-      <div class="action-item" @click="$router.push('/profile')">
-        <div class="action-icon">💰</div>
-        <span>返利中心</span>
+      <div class="action-item">
+        <div class="action-icon">🏆</div>
+        <span>热门排行</span>
       </div>
       <div class="action-item">
         <div class="action-icon">📊</div>
@@ -133,7 +133,7 @@ async function handleHotSearch(kw: string) {
   transform: translateX(-50%);
   width: 300px;
   height: 300px;
-  background: radial-gradient(circle, $color-primary-glow, transparent 70%);
+  background: radial-gradient(circle, var(--color-primary-glow), transparent 70%);
   pointer-events: none;
 }
 
@@ -144,7 +144,7 @@ async function handleHotSearch(kw: string) {
 }
 
 .hero-sub {
-  color: $text-secondary;
+  color: var(--text-secondary);
   font-size: $font-md;
   margin-bottom: $spacing-xl;
 }
@@ -159,8 +159,8 @@ async function handleHotSearch(kw: string) {
     padding: 0;
   }
   :deep(.van-search__content) {
-    background: $bg-input;
-    border: 1px solid $border-color;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
     border-radius: 24px;
     padding-left: 4px;
   }
@@ -184,8 +184,8 @@ async function handleHotSearch(kw: string) {
     width: 52px;
     height: 52px;
     border-radius: $radius-md;
-    background: $bg-card;
-    border: 1px solid $border-color;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -194,13 +194,13 @@ async function handleHotSearch(kw: string) {
 
     &:active {
       transform: scale(0.92);
-      box-shadow: $shadow-glow;
+      box-shadow: 0 0 20px var(--color-primary-glow);
     }
   }
 
   span {
     font-size: $font-sm;
-    color: $text-secondary;
+    color: var(--text-secondary);
   }
 }
 
@@ -219,9 +219,9 @@ async function handleHotSearch(kw: string) {
   .dot {
     width: 4px;
     height: 18px;
-    background: $color-primary;
+    background: var(--color-primary);
     border-radius: 2px;
-    box-shadow: 0 0 8px $color-primary-glow;
+    box-shadow: 0 0 8px var(--color-primary-glow);
   }
 }
 
@@ -232,13 +232,13 @@ async function handleHotSearch(kw: string) {
 
   .tag {
     cursor: pointer;
-    border-color: $border-glow;
-    color: $text-accent;
+    border-color: var(--border-glow);
+    color: var(--text-accent);
     transition: all $transition-fast;
 
     &:active {
-      background: $color-primary;
-      color: $bg-primary;
+      background: var(--color-primary);
+      color: var(--bg-primary);
     }
   }
 }
@@ -258,7 +258,7 @@ async function handleHotSearch(kw: string) {
 .result-price {
   font-size: $font-lg;
   font-weight: 700;
-  color: $color-up;
+  color: var(--color-up);
 }
 
 .center-loading {

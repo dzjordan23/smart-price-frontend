@@ -15,6 +15,30 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '智选比价', requiresAuth: true },
   },
   {
+    path: '/community',
+    name: 'Community',
+    component: () => import('@/views/Community.vue'),
+    meta: { title: '社群互动', requiresAuth: true },
+  },
+  {
+    path: '/commission',
+    name: 'Commission',
+    component: () => import('@/views/Commission.vue'),
+    meta: { title: '返利中心', requiresAuth: true },
+  },
+  {
+    path: '/profile',
+    name: 'Profile',
+    component: () => import('@/views/Profile.vue'),
+    meta: { title: '我的', requiresAuth: true },
+  },
+  {
+    path: '/settings',
+    name: 'Settings',
+    component: () => import('@/views/Settings.vue'),
+    meta: { title: '账号设置', requiresAuth: true },
+  },
+  {
     path: '/recognize',
     name: 'Recognize',
     component: () => import('@/views/Recognize.vue'),
@@ -37,12 +61,6 @@ const routes: RouteRecordRaw[] = [
     name: 'WatchList',
     component: () => import('@/views/WatchList.vue'),
     meta: { title: '降价提醒', requiresAuth: true },
-  },
-  {
-    path: '/profile',
-    name: 'Profile',
-    component: () => import('@/views/Profile.vue'),
-    meta: { title: '我的', requiresAuth: true },
   },
 ]
 

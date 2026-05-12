@@ -105,6 +105,8 @@ const lowestPrice = computed(() => {
 
 <template>
   <div class="page compare-page">
+    <van-nav-bar title="全网比价" left-arrow :border="false" class="nav-bar" @click-left="$router.back()" />
+
     <!-- 商品信息 -->
     <div v-if="result?.product" class="product-header card glow-border">
       <div class="product-name">{{ result.product.name }}</div>
@@ -180,6 +182,10 @@ const lowestPrice = computed(() => {
 </template>
 
 <style lang="scss" scoped>
+.nav-bar {
+  margin: (-$spacing-md) (-$spacing-md) $spacing-md;
+}
+
 .product-header {
   display: flex;
   justify-content: space-between;
@@ -208,7 +214,7 @@ const lowestPrice = computed(() => {
   .dot {
     width: 4px;
     height: 18px;
-    background: $color-primary;
+    background: var(--color-primary);
     border-radius: 2px;
   }
 }
@@ -221,8 +227,8 @@ const lowestPrice = computed(() => {
   transition: all $transition-normal;
 
   &.lowest {
-    border-color: $color-primary;
-    box-shadow: $shadow-glow;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 20px var(--color-primary-glow);
   }
 
   &:active { transform: scale(0.98); }
@@ -267,18 +273,18 @@ const lowestPrice = computed(() => {
 .final-price {
   font-size: $font-xxl;
   font-weight: 800;
-  color: $color-up;
+  color: var(--color-up);
 }
 
 .original-price {
   font-size: $font-sm;
-  color: $text-muted;
+  color: var(--text-muted);
   text-decoration: line-through;
 }
 
 .saved-tag {
   font-size: $font-xs;
-  color: $color-success;
+  color: var(--color-success);
   background: rgba(16, 185, 129, 0.1);
   padding: 2px 6px;
   border-radius: 4px;
@@ -286,12 +292,12 @@ const lowestPrice = computed(() => {
 
 .coupon-info {
   font-size: $font-xs;
-  color: $color-warning;
+  color: var(--color-warning);
 }
 
 .buy-btn {
   flex-shrink: 0;
-  background: linear-gradient(135deg, $color-primary, $color-secondary);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   border: none;
 }
 
@@ -306,6 +312,6 @@ const lowestPrice = computed(() => {
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
-  color: $text-secondary;
+  color: var(--text-secondary);
 }
 </style>

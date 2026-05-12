@@ -73,6 +73,7 @@ async function handleLogin() {
           type="text"
           size="large"
           clearable
+          class="login-field"
           @keyup.enter="handleLogin"
         />
         <van-button
@@ -121,14 +122,14 @@ async function handleLogin() {
 .orb-1 {
   width: 300px;
   height: 300px;
-  background: $color-primary;
+  background: var(--color-primary);
   top: -100px;
   right: -50px;
 }
 .orb-2 {
   width: 250px;
   height: 250px;
-  background: $color-secondary;
+  background: var(--color-secondary);
   bottom: -80px;
   left: -60px;
 }
@@ -148,7 +149,7 @@ async function handleLogin() {
 .logo-icon {
   font-size: 64px;
   margin-bottom: $spacing-md;
-  filter: drop-shadow(0 0 20px $color-primary-glow);
+  filter: drop-shadow(0 0 20px var(--color-primary-glow));
 }
 
 h1 {
@@ -159,7 +160,7 @@ h1 {
 }
 
 .subtitle {
-  color: $text-secondary;
+  color: var(--text-secondary);
   font-size: $font-md;
 }
 
@@ -167,9 +168,27 @@ h1 {
   margin-bottom: $spacing-lg;
 }
 
+.login-field {
+  background: var(--bg-input) !important;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  margin-bottom: $spacing-md;
+  padding: 4px $spacing-md;
+
+  :deep(.van-field__control) {
+    color: var(--text-primary) !important;
+    font-size: $font-lg;
+    caret-color: var(--color-primary);
+
+    &::placeholder {
+      color: var(--text-muted) !important;
+    }
+  }
+}
+
 .form-hint {
   text-align: center;
-  color: $text-muted;
+  color: var(--text-muted);
   font-size: $font-sm;
   margin-bottom: $spacing-md;
 }
@@ -179,14 +198,14 @@ h1 {
   height: 50px;
   font-size: $font-lg;
   font-weight: 600;
-  background: linear-gradient(135deg, $color-primary, $color-secondary);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   border: none;
-  box-shadow: $shadow-glow;
+  box-shadow: 0 0 20px var(--color-primary-glow);
 }
 
 .footer-text {
   text-align: center;
-  color: $text-muted;
+  color: var(--text-muted);
   font-size: $font-xs;
 }
 </style>

@@ -3,8 +3,10 @@ import { showToast } from 'vant'
 import { useAuthStore } from '@/stores/auth'
 import router from '@/router'
 
+const API_BASE = import.meta.env.VITE_API_BASE || '/v1'
+
 const request = axios.create({
-  baseURL: '/v1',
+  baseURL: API_BASE,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',

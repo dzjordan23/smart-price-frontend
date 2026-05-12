@@ -213,14 +213,14 @@ const currentMin = computed(() => {
 }
 
 .current-label {
-  color: $text-secondary;
+  color: var(--text-secondary);
   font-size: $font-sm;
 }
 
 .current-price {
   font-size: 32px;
   font-weight: 800;
-  color: $color-up;
+  color: var(--color-up);
 }
 
 .chart-card {
@@ -238,7 +238,7 @@ const currentMin = computed(() => {
   .dot {
     width: 3px;
     height: 14px;
-    background: $color-primary;
+    background: var(--color-primary);
     border-radius: 2px;
   }
 }
@@ -256,14 +256,14 @@ const currentMin = computed(() => {
   border: none;
 
   &.compare {
-    background: linear-gradient(135deg, $color-primary, $color-secondary);
-    box-shadow: $shadow-glow;
+    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    box-shadow: 0 0 20px var(--color-primary-glow);
   }
 
   &.watch {
-    background: $bg-card;
-    border: 1px solid $border-glow;
-    color: $text-primary;
+    background: var(--bg-card);
+    border: 1px solid var(--border-glow);
+    color: var(--text-primary);
   }
 }
 </style>

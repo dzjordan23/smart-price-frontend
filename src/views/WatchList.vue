@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { getWatchList } from '@/api/price'
-import type { List } from 'vant'
 
 const list = ref<any[]>([])
 const loading = ref(false)
@@ -41,6 +40,8 @@ function priceDiff(item: any) {
 
 <template>
   <div class="page watchlist-page">
+    <van-nav-bar title="降价提醒" left-arrow :border="false" class="nav-bar" @click-left="$router.back()" />
+
     <h2 class="page-title gradient-text">降价提醒</h2>
     <p class="page-desc">实时监控商品价格，达到目标价自动通知</p>
 
@@ -96,6 +97,10 @@ function priceDiff(item: any) {
 </template>
 
 <style lang="scss" scoped>
+.nav-bar {
+  margin: (-$spacing-md) (-$spacing-md) $spacing-md;
+}
+
 .page-title {
   font-size: $font-xxl;
   font-weight: 700;
@@ -103,7 +108,7 @@ function priceDiff(item: any) {
 }
 
 .page-desc {
-  color: $text-secondary;
+  color: var(--text-secondary);
   font-size: $font-md;
   margin-bottom: $spacing-lg;
 }
@@ -139,22 +144,22 @@ function priceDiff(item: any) {
 
   .label {
     font-size: $font-xs;
-    color: $text-muted;
+    color: var(--text-muted);
     margin-bottom: $spacing-xs;
   }
 
   .price {
     font-size: $font-xl;
     font-weight: 700;
-    color: $text-primary;
+    color: var(--text-primary);
 
-    &.up { color: $color-up; }
-    &.target { color: $color-success; }
+    &.up { color: var(--color-up); }
+    &.target { color: var(--color-success); }
   }
 }
 
 .price-arrow {
-  color: $text-muted;
+  color: var(--text-muted);
   font-size: $font-lg;
 }
 
@@ -163,11 +168,11 @@ function priceDiff(item: any) {
   justify-content: space-between;
   align-items: center;
   padding-top: $spacing-sm;
-  border-top: 1px solid $border-color;
+  border-top: 1px solid var(--border-color);
   font-size: $font-sm;
 
-  .platform { color: $text-muted; }
-  .triggered-msg { color: $color-warning; font-weight: 600; }
-  .diff-msg { color: $text-secondary; }
+  .platform { color: var(--text-muted); }
+  .triggered-msg { color: var(--color-warning); font-weight: 600; }
+  .diff-msg { color: var(--text-secondary); }
 }
 </style>

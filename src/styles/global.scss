@@ -6,28 +6,40 @@
   box-sizing: border-box;
 }
 
+// 默认蓝色主题（JS 会覆盖，此处作 fallback）
 :root {
-  --bg-primary: #{$bg-primary};
-  --bg-secondary: #{$bg-secondary};
-  --bg-card: #{$bg-card};
-  --text-primary: #{$text-primary};
-  --text-secondary: #{$text-secondary};
-  --text-accent: #{$text-accent};
-  --color-primary: #{$color-primary};
-  --color-success: #{$color-success};
-  --color-danger: #{$color-danger};
-  --border-color: #{$border-color};
+  --color-primary: #2b7de9;
+  --color-secondary: #5b9cf6;
+  --color-primary-glow: rgba(43, 125, 233, 0.15);
+  --bg-primary: #f0f5ff;
+  --bg-secondary: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.92);
+  --bg-card-hover: rgba(240, 245, 255, 0.95);
+  --bg-input: rgba(43, 125, 233, 0.06);
+  --bg-glass: rgba(43, 125, 233, 0.05);
+  --text-primary: #1a2a44;
+  --text-secondary: #5a6d85;
+  --text-muted: #94a3b8;
+  --text-accent: #2b7de9;
+  --border-color: rgba(43, 125, 233, 0.1);
+  --border-glow: rgba(43, 125, 233, 0.2);
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-up: #ef4444;
+  --color-down: #22c55e;
 }
 
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  background-color: $bg-primary;
-  color: $text-primary;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
   font-size: $font-md;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 #app {
@@ -35,12 +47,13 @@ html, body {
   max-width: 480px;
   margin: 0 auto;
   position: relative;
-  background: linear-gradient(180deg, $bg-primary 0%, $bg-secondary 100%);
+  background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
   min-height: 100dvh;
+  transition: background 0.3s ease;
 }
 
 a {
-  color: $color-primary;
+  color: var(--color-primary);
   text-decoration: none;
 }
 
@@ -52,36 +65,35 @@ a {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(128, 128, 128, 0.2);
   border-radius: 4px;
 }
 
 // 通用卡片
 .card {
-  background: $bg-card;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid $border-color;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: $radius-lg;
   padding: $spacing-lg;
   margin-bottom: $spacing-md;
   transition: all $transition-normal;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
 
   &:active {
     transform: scale(0.98);
-    background: $bg-card-hover;
+    background: var(--bg-card-hover);
   }
 }
 
 // 霓虹光效
 .glow-border {
-  border: 1px solid $border-glow;
-  box-shadow: $shadow-glow;
+  border: 1px solid var(--border-glow);
+  box-shadow: 0 0 20px var(--color-primary-glow);
 }
 
 // 渐变文字
 .gradient-text {
-  background: linear-gradient(135deg, $color-primary, $color-secondary);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -93,19 +105,28 @@ a {
   padding-bottom: calc(80px + #{$safe-bottom});
 }
 
-// Vant 深色主题覆盖
+// Vant 主题变量（JS 会动态覆盖）
 :root:root {
-  --van-background: #{$bg-primary};
-  --van-background-2: #{$bg-secondary};
-  --van-text-color: #{$text-primary};
-  --van-text-color-2: #{$text-secondary};
-  --van-text-color-3: #{$text-muted};
-  --van-border-color: #{$border-color};
-  --van-active-color: rgba(255, 255, 255, 0.05);
-  --van-nav-bar-background: transparent;
-  --van-nav-bar-title-text-color: #{$text-primary};
-  --van-nav-bar-icon-color: #{$text-primary};
-  --van-field-input-text-color: #{$text-primary};
-  --van-button-primary-background: #{$color-primary};
-  --van-button-primary-border-color: #{$color-primary};
+  --van-background: var(--bg-primary);
+  --van-background-2: var(--bg-secondary);
+  --van-text-color: var(--text-primary);
+  --van-text-color-2: var(--text-secondary);
+  --van-text-color-3: var(--text-muted);
+  --van-border-color: var(--border-color);
+  --van-active-color: rgba(128, 128, 128, 0.05);
+  --van-field-input-text-color: var(--text-primary);
+  --van-field-label-color: var(--text-secondary);
+  --van-field-placeholder-color: var(--text-muted);
+  --van-field-background: transparent;
+  --van-cell-background: transparent;
+  --van-cell-group-background: var(--bg-input);
+  --van-nav-bar-background: var(--bg-primary);
+  --van-nav-bar-title-text-color: var(--text-primary);
+  --van-nav-bar-icon-color: var(--text-primary);
+  --van-button-primary-background: var(--color-primary);
+  --van-button-primary-border-color: var(--color-primary);
+  --van-tabbar-background: var(--bg-secondary);
+  --van-tabbar-item-text-color: var(--text-muted);
+  --van-tabbar-item-active-color: var(--color-primary);
 }
+

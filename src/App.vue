@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
-import { Tabbar, TabbarItem } from 'vant'
 </script>
 
 <template>
@@ -10,27 +9,20 @@ import { Tabbar, TabbarItem } from 'vant'
     </transition>
   </RouterView>
 
-  <Tabbar v-if="$route.meta.requiresAuth" route class="tabbar">
-    <TabbarItem to="/" icon="search" name="home">首页</TabbarItem>
-    <TabbarItem to="/recognize" icon="photograph" name="recognize">识别</TabbarItem>
-    <TabbarItem to="/watchlist" icon="bell" name="watchlist">提醒</TabbarItem>
-    <TabbarItem to="/profile" icon="user-o" name="profile">我的</TabbarItem>
-  </Tabbar>
+  <van-tabbar v-if="$route.meta.requiresAuth" route class="app-tabbar">
+    <van-tabbar-item to="/" icon="search" name="home">智选比价</van-tabbar-item>
+    <van-tabbar-item to="/community" icon="chat-o" name="community">社群互动</van-tabbar-item>
+    <van-tabbar-item to="/commission" icon="balance-o" name="commission">返利中心</van-tabbar-item>
+    <van-tabbar-item to="/profile" icon="user-o" name="profile">我的</van-tabbar-item>
+  </van-tabbar>
 </template>
 
 <style lang="scss" scoped>
-.tabbar {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
+.app-tabbar {
   max-width: 480px;
-  background: rgba(10, 14, 26, 0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid $border-color;
-  padding-bottom: $safe-bottom;
-  z-index: 100;
+  left: 50% !important;
+  transform: translateX(-50%);
+  border-top: 1px solid var(--border-color);
+  padding-bottom: $safe-bottom !important;
 }
 </style>
