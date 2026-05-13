@@ -20,6 +20,7 @@ RUN npm run build
 RUN npm install -g serve
 
 # Railway 会注入 PORT 环境变量
+# build: 2026-05-13
 ENV PORT=8080
 
 # 暴露端口
