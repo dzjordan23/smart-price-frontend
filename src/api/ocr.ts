@@ -541,6 +541,7 @@ function extractProductKeywords(text: string, words: string[] = []): string[] {
 
 /**
  * 根据 OCR 结果生成标准商品名称
+ * 优化版本：提高匹配成功率，降低误识别
  */
 export function generateProductNameFromOcr(ocrResult: OcrResult): {
   name: string
@@ -551,6 +552,7 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
 } {
   const { text, productKeywords, confidence, words } = ocrResult
 
+  // 清理文本：去除空格、转小写
   const cleanText = text.replace(/\s+/g, '').toLowerCase()
   const cleanWords = (words || []).map(w => w.replace(/\s+/g, '').toLowerCase()).join('')
   
@@ -567,275 +569,414 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     '茅台': '茅台', '五粮液': '五粮液',
   }
 
-  const matchProduct = (patterns: [string | RegExp, string][]): string | null => {
-    for (const [pattern, name] of patterns) {
-      if (typeof pattern === 'string') {
-        const p = pattern.toLowerCase()
-        if (cleanText.includes(p) || cleanWords.includes(p)) {
-          return name
-        }
-      } else {
-        if (pattern.test(text) || pattern.test(cleanText) || pattern.test(cleanWords)) {
-          return name
-        }
-      }
-    }
-    return null
+  // 辅助函数：检查文本是否匹配
+  const matches = (pattern: string | RegExp): boolean => {
+    const flags = typeof pattern === 'string' ? '' : 'gi'
+    const str = typeof pattern === 'string' ? pattern.toLowerCase() : pattern.source
+    return cleanText.includes(str.toLowerCase()) || cleanWords.includes(str.toLowerCase())
+  }
+  
+  const matchesRegex = (regex: RegExp): boolean => {
+    // 重置 lastIndex
+    regex.lastIndex = 0
+    return regex.test(text) || regex.test(cleanText) || regex.test(cleanWords)
   }
 
-  // iPhone 系列
-  const iphonePatterns: [string | RegExp, string][] = [
-    [/iphone\s*16\s*pro\s*max/gi, 'iPhone 16 Pro Max'],
-    [/iphone\s*16\s*pro/gi, 'iPhone 16 Pro'],
-    [/iphone\s*16/gi, 'iPhone 16'],
-    [/iphone\s*15\s*pro\s*max/gi, 'iPhone 15 Pro Max'],
-    [/iphone\s*15\s*pro/gi, 'iPhone 15 Pro'],
-    [/iphone\s*15/gi, 'iPhone 15'],
-    [/iphone\s*14\s*pro\s*max/gi, 'iPhone 14 Pro Max'],
-    [/iphone\s*14\s*pro/gi, 'iPhone 14 Pro'],
-    [/iphone\s*14/gi, 'iPhone 14'],
-    [/iphone\s*13/gi, 'iPhone 13'],
-    [/iphone\s*12/gi, 'iPhone 12'],
-    [/iphone16promax/gi, 'iPhone 16 Pro Max'],
-    [/iphone16pro/gi, 'iPhone 16 Pro'],
-    [/iphone16/gi, 'iPhone 16'],
+  // 计算基础置信度：使用 OCR 置信度，但有保底值
+  const baseConfidence = Math.max(confidence / 100, 0.4)
+
+  // iPhone 系列（最高优先级，Apple 品牌）
+  const iphonePatterns = [
+    { regex: /iphone\s*16\s*pro\s*max/gi, name: 'iPhone 16 Pro Max' },
+    { regex: /iphone\s*16\s*pro/gi, name: 'iPhone 16 Pro' },
+    { regex: /iphone\s*16/gi, name: 'iPhone 16' },
+    { regex: /iphone\s*15\s*pro\s*max/gi, name: 'iPhone 15 Pro Max' },
+    { regex: /iphone\s*15\s*pro/gi, name: 'iPhone 15 Pro' },
+    { regex: /iphone\s*15/gi, name: 'iPhone 15' },
+    { regex: /iphone\s*14\s*pro\s*max/gi, name: 'iPhone 14 Pro Max' },
+    { regex: /iphone\s*14\s*pro/gi, name: 'iPhone 14 Pro' },
+    { regex: /iphone\s*14/gi, name: 'iPhone 14' },
+    { regex: /iphone\s*13/gi, name: 'iPhone 13' },
+    { regex: /iphone\s*12/gi, name: 'iPhone 12' },
+    { regex: /iphone16promax/gi, name: 'iPhone 16 Pro Max' },
+    { regex: /iphone16pro/gi, name: 'iPhone 16 Pro' },
+    { regex: /iphone16/gi, name: 'iPhone 16' },
+    { regex: /iphone/gi, name: 'iPhone' },
   ]
-  const matchedIphone = matchProduct(iphonePatterns)
-  if (matchedIphone) {
-    return {
-      name: matchedIphone,
-      brand: 'Apple',
-      category: '手机',
-      confidence: Math.min(confidence / 100 + 0.2, 1),
-      matchedBy: '精确匹配'
+  for (const p of iphonePatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: 'Apple',
+        category: '手机',
+        confidence: Math.min(baseConfidence + 0.3, 1),
+        matchedBy: 'iPhone系列'
+      }
     }
   }
 
   // Apple 产品
-  const applePatterns: [string | RegExp, string][] = [
-    [/macbook\s*air/gi, 'MacBook Air'],
-    [/macbook\s*pro/gi, 'MacBook Pro'],
-    [/macbook/gi, 'MacBook'],
-    [/ipad\s*pro/gi, 'iPad Pro'],
-    [/ipad\s*air/gi, 'iPad Air'],
-    [/ipad\s*mini/gi, 'iPad mini'],
-    [/ipad/gi, 'iPad'],
-    [/airpods\s*pro/gi, 'AirPods Pro'],
-    [/airpods/gi, 'AirPods'],
-    [/apple\s*watch/gi, 'Apple Watch'],
+  const applePatterns = [
+    { regex: /macbook\s*air/gi, name: 'MacBook Air' },
+    { regex: /macbook\s*pro/gi, name: 'MacBook Pro' },
+    { regex: /macbook/gi, name: 'MacBook' },
+    { regex: /ipad\s*pro/gi, name: 'iPad Pro' },
+    { regex: /ipad\s*air/gi, name: 'iPad Air' },
+    { regex: /ipad\s*mini/gi, name: 'iPad mini' },
+    { regex: /ipad/gi, name: 'iPad' },
+    { regex: /airpods\s*pro/gi, name: 'AirPods Pro' },
+    { regex: /airpods/gi, name: 'AirPods' },
+    { regex: /apple\s*watch/gi, name: 'Apple Watch' },
   ]
-  const matchedApple = matchProduct(applePatterns)
-  if (matchedApple) {
-    return {
-      name: matchedApple,
-      brand: 'Apple',
-      category: matchedApple.includes('Watch') ? '手表' : matchedApple.includes('Pad') ? '平板' : '电脑',
-      confidence: Math.min(confidence / 100 + 0.15, 1),
-      matchedBy: 'Apple产品'
+  for (const p of applePatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: 'Apple',
+        category: p.name.includes('Watch') ? '手表' : p.name.includes('Pad') ? '平板' : '电脑',
+        confidence: Math.min(baseConfidence + 0.25, 1),
+        matchedBy: 'Apple产品'
+      }
     }
   }
 
   // 华为
-  const huaweiPatterns: [string | RegExp, string][] = [
-    [/mate\s*60\s*pro/gi, '华为Mate60 Pro'],
-    [/mate\s*60/gi, '华为Mate60'],
-    [/mate\s*50\s*pro/gi, '华为Mate50 Pro'],
-    [/mate\s*50/gi, '华为Mate50'],
-    [/pura\s*70\s*ultra/gi, '华为Pura70 Ultra'],
-    [/pura\s*70\s*pro/gi, '华为Pura70 Pro'],
-    [/pura\s*70/gi, '华为Pura70'],
-    [/(?:华为|huawei|mate|pura)/gi, '华为'],
+  const huaweiPatterns = [
+    { regex: /mate\s*60\s*pro/gi, name: '华为Mate60 Pro' },
+    { regex: /mate\s*60/gi, name: '华为Mate60' },
+    { regex: /mate\s*50\s*pro/gi, name: '华为Mate50 Pro' },
+    { regex: /mate\s*50/gi, name: '华为Mate50' },
+    { regex: /pura\s*70\s*ultra/gi, name: '华为Pura70 Ultra' },
+    { regex: /pura\s*70\s*pro/gi, name: '华为Pura70 Pro' },
+    { regex: /pura\s*70/gi, name: '华为Pura70' },
+    { regex: /mate60/gi, name: '华为Mate60' },
+    { regex: /mate50/gi, name: '华为Mate50' },
+    { regex: /pura70/gi, name: '华为Pura70' },
   ]
-  const matchedHuawei = matchProduct(huaweiPatterns)
-  if (matchedHuawei) {
+  for (const p of huaweiPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: '华为',
+        category: '手机',
+        confidence: Math.min(baseConfidence + 0.25, 1),
+        matchedBy: '华为产品'
+      }
+    }
+  }
+  // 通用华为匹配
+  if (matches(/华为/) || matches(/huawei/) || matches(/mate/) || matches(/pura/)) {
     return {
-      name: matchedHuawei,
+      name: '华为手机',
       brand: '华为',
       category: '手机',
-      confidence: Math.min(confidence / 100 + 0.15, 1),
-      matchedBy: '华为产品'
+      confidence: Math.min(baseConfidence + 0.2, 1),
+      matchedBy: '华为品牌'
     }
   }
 
   // 小米
-  const xiaomiPatterns: [string | RegExp, string][] = [
-    [/小米\s*(?:14|13|12)\s*ultra/gi, '小米14 Ultra'],
-    [/小米\s*(?:14|13|12)/gi, '小米'],
-    [/redmi\s*k70/gi, 'Redmi K70'],
-    [/redmi\s*note/gi, 'Redmi Note'],
-    [/(?:xiaomi|小米|redmi|红米)/gi, '小米'],
+  const xiaomiPatterns = [
+    { regex: /小米\s*14\s*ultra/gi, name: '小米14 Ultra' },
+    { regex: /小米\s*14/gi, name: '小米14' },
+    { regex: /小米\s*13\s*ultra/gi, name: '小米13 Ultra' },
+    { regex: /小米\s*13/gi, name: '小米13' },
+    { regex: /小米\s*12/gi, name: '小米12' },
+    { regex: /redmi\s*k70/gi, name: 'Redmi K70' },
+    { regex: /redmi\s*k60/gi, name: 'Redmi K60' },
+    { regex: /redmi\s*note/gi, name: 'Redmi Note' },
   ]
-  const matchedXiaomi = matchProduct(xiaomiPatterns)
-  if (matchedXiaomi) {
+  for (const p of xiaomiPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: '小米',
+        category: '手机/数码',
+        confidence: Math.min(baseConfidence + 0.25, 1),
+        matchedBy: '小米产品'
+      }
+    }
+  }
+  if (matches(/小米/) || matches(/xiaomi/) || matches(/redmi/) || matches(/红米/)) {
     return {
-      name: matchedXiaomi,
+      name: '小米手机',
       brand: '小米',
       category: '手机/数码',
-      confidence: Math.min(confidence / 100 + 0.15, 1),
-      matchedBy: '小米产品'
+      confidence: Math.min(baseConfidence + 0.2, 1),
+      matchedBy: '小米品牌'
+    }
+  }
+
+  // 三星
+  if (matches(/三星/) || matches(/samsung/) || matches(/galaxy/)) {
+    return {
+      name: '三星手机',
+      brand: '三星',
+      category: '手机',
+      confidence: Math.min(baseConfidence + 0.2, 1),
+      matchedBy: '三星品牌'
     }
   }
 
   // 游戏机
-  const gamingPatterns: [string | RegExp, string][] = [
-    [/(?:nintendo|ns|任天堂)\s*switch/gi, 'Nintendo Switch'],
-    [/switch\s*oled/gi, 'Nintendo Switch OLED'],
-    [/switch/gi, 'Nintendo Switch'],
-    [/ps5/gi, 'PS5'],
-    [/ps4/gi, 'PS4'],
-    [/playstation/gi, 'PlayStation'],
-    [/xbox\s*series\s*x/gi, 'Xbox Series X'],
-    [/xbox\s*series\s*s/gi, 'Xbox Series S'],
-    [/xbox/gi, 'Xbox'],
+  const gamingPatterns = [
+    { regex: /nintendo\s*switch\s*oled/gi, name: 'Nintendo Switch OLED' },
+    { regex: /nintendo\s*switch/gi, name: 'Nintendo Switch' },
+    { regex: /switch\s*oled/gi, name: 'Nintendo Switch OLED' },
+    { regex: /ns\s*oled/gi, name: 'Nintendo Switch OLED' },
+    { regex: /ns/gi, name: 'Nintendo Switch' },
+    { regex: /任天堂/gi, name: 'Nintendo Switch' },
+    { regex: /ps5/gi, name: 'PS5' },
+    { regex: /ps4/gi, name: 'PS4' },
+    { regex: /playstation\s*5/gi, name: 'PS5' },
+    { regex: /playstation\s*4/gi, name: 'PS4' },
+    { regex: /playstation/gi, name: 'PlayStation' },
+    { regex: /xbox\s*series\s*x/gi, name: 'Xbox Series X' },
+    { regex: /xbox\s*series\s*s/gi, name: 'Xbox Series S' },
+    { regex: /xbox/gi, name: 'Xbox' },
   ]
-  const matchedGaming = matchProduct(gamingPatterns)
-  if (matchedGaming) {
-    return {
-      name: matchedGaming,
-      brand: matchedGaming.includes('Nintendo') ? 'Nintendo' : matchedGaming.includes('PS') ? '索尼' : '微软',
-      category: '游戏机',
-      confidence: Math.min(confidence / 100 + 0.15, 1),
-      matchedBy: '游戏机'
+  for (const p of gamingPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: p.name.includes('Nintendo') ? 'Nintendo' : p.name.includes('PS') ? '索尼' : '微软',
+        category: '游戏机',
+        confidence: Math.min(baseConfidence + 0.25, 1),
+        matchedBy: '游戏机'
+      }
     }
   }
 
   // 戴森
-  const dysonPatterns: [string | RegExp, string][] = [
-    [/dyson\s*airwrap/gi, '戴森Airwrap'],
-    [/戴森\s*卷发/gi, '戴森Airwrap'],
-    [/hd15|dyson\s*(?:supersonic)?hd15/gi, '戴森吹风机 HD15'],
-    [/hd03/gi, '戴森吹风机 HD03'],
-    [/(?:dyson|戴森)\s*(?:吹风机|supersonic)/gi, '戴森吹风机'],
-    [/dyson\s*v15/gi, '戴森V15吸尘器'],
-    [/dyson\s*v12/gi, '戴森V12吸尘器'],
-    [/dyson\s*v10/gi, '戴森V10吸尘器'],
-    [/(?:dyson|戴森)\s*吸尘/gi, '戴森吸尘器'],
-    [/(?:dyson|戴森)/gi, '戴森'],
+  const dysonPatterns = [
+    { regex: /dyson\s*airwrap/gi, name: '戴森Airwrap' },
+    { regex: /戴森\s*卷发/gi, name: '戴森Airwrap' },
+    { regex: /airwrap/gi, name: '戴森Airwrap' },
+    { regex: /hd15/gi, name: '戴森吹风机 HD15' },
+    { regex: /hd03/gi, name: '戴森吹风机 HD03' },
+    { regex: /dyson\s*hd15/gi, name: '戴森吹风机 HD15' },
+    { regex: /dyson\s*hd03/gi, name: '戴森吹风机 HD03' },
+    { regex: /戴森\s*吹风机/gi, name: '戴森吹风机' },
+    { regex: /dyson\s*吹风机/gi, name: '戴森吹风机' },
+    { regex: /dyson\s*v15/gi, name: '戴森V15吸尘器' },
+    { regex: /dyson\s*v12/gi, name: '戴森V12吸尘器' },
+    { regex: /dyson\s*v10/gi, name: '戴森V10吸尘器' },
+    { regex: /戴森\s*吸尘/gi, name: '戴森吸尘器' },
+    { regex: /dyson/gi, name: '戴森' },
+    { regex: /戴森/gi, name: '戴森' },
   ]
-  const matchedDyson = matchProduct(dysonPatterns)
-  if (matchedDyson) {
-    return {
-      name: matchedDyson,
-      brand: '戴森',
-      category: matchedDyson.includes('吸尘') ? '家电' : '个护',
-      confidence: Math.min(confidence / 100 + 0.15, 1),
-      matchedBy: '戴森产品'
+  for (const p of dysonPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: '戴森',
+        category: p.name.includes('吸尘') ? '家电' : '个护',
+        confidence: Math.min(baseConfidence + 0.25, 1),
+        matchedBy: '戴森产品'
+      }
     }
   }
 
-  // 运动
-  const sportPatterns: [string | RegExp, string][] = [
-    [/aj|air\s*jordan/gi, 'Air Jordan'],
-    [/(?:nike|耐克)/gi, '耐克'],
-    [/(?:adidas|阿迪达斯)/gi, '阿迪达斯'],
-    [/新百伦|new\s*balance/gi, 'New Balance'],
-    [/(?:安踏|anta)/gi, '安踏'],
-    [/(?:李宁|li-ning)/gi, '李宁'],
+  // 运动品牌
+  const sportPatterns = [
+    { regex: /air\s*jordan/gi, name: 'Air Jordan' },
+    { regex: /airjordan/gi, name: 'Air Jordan' },
+    { regex: /aj\d/gi, name: 'Air Jordan' },
+    { regex: /耐克\s*运动鞋/gi, name: '耐克运动鞋' },
+    { regex: /nike\s*运动鞋/gi, name: '耐克运动鞋' },
+    { regex: /耐克/gi, name: '耐克' },
+    { regex: /nike/gi, name: '耐克' },
+    { regex: /阿迪达斯/gi, name: '阿迪达斯' },
+    { regex: /adidas\s*运动鞋/gi, name: '阿迪达斯运动鞋' },
+    { regex: /adidas/gi, name: '阿迪达斯' },
+    { regex: /新百伦/gi, name: 'New Balance' },
+    { regex: /new\s*balance/gi, name: 'New Balance' },
+    { regex: /\bnb\s*运动鞋/gi, name: 'New Balance' },
+    { regex: /安踏/gi, name: '安踏' },
+    { regex: /李宁/gi, name: '李宁' },
   ]
-  const matchedSport = matchProduct(sportPatterns)
-  if (matchedSport) {
-    return {
-      name: matchedSport,
-      brand: matchedSport.includes('耐克') ? '耐克' : matchedSport.includes('阿迪') ? '阿迪达斯' : '运动品牌',
-      category: '运动',
-      confidence: Math.min(confidence / 100 + 0.15, 1),
-      matchedBy: '运动品牌'
+  for (const p of sportPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: p.name.includes('耐克') ? '耐克' : p.name.includes('阿迪') ? '阿迪达斯' : '运动品牌',
+        category: '运动',
+        confidence: Math.min(baseConfidence + 0.2, 1),
+        matchedBy: '运动品牌'
+      }
     }
   }
 
   // 美妆
-  const beautyPatterns: [string | RegExp, string][] = [
-    [/sk-?ii|skii/gi, 'SK-II'],
-    [/海蓝之谜|lamer/gi, '海蓝之谜'],
-    [/(?:兰蔻|lancome)/gi, '兰蔻'],
-    [/雅诗兰黛|estee\s*lauder/gi, '雅诗兰黛'],
-    [/(?:迪奥|dior)/gi, '迪奥'],
-    [/香奈儿|chanel/gi, '香奈儿'],
-    [/ysl/gi, 'YSL'],
-    [/(?:mac|魅可)/gi, 'MAC'],
+  const beautyPatterns = [
+    { regex: /sk-?ii/gi, name: 'SK-II' },
+    { regex: /skii/gi, name: 'SK-II' },
+    { regex: /神仙水/gi, name: 'SK-II神仙水' },
+    { regex: /海蓝之谜/gi, name: '海蓝之谜' },
+    { regex: /lamer/gi, name: '海蓝之谜' },
+    { regex: /兰蔻/gi, name: '兰蔻' },
+    { regex: /lancome/gi, name: '兰蔻' },
+    { regex: /雅诗兰黛/gi, name: '雅诗兰黛' },
+    { regex: /estee\s*lauder/gi, name: '雅诗兰黛' },
+    { regex: /迪奥/gi, name: '迪奥' },
+    { regex: /dior/gi, name: '迪奥' },
+    { regex: /香奈儿/gi, name: '香奈儿' },
+    { regex: /chanel/gi, name: '香奈儿' },
+    { regex: /ysl/gi, name: 'YSL' },
+    { regex: /mac\s*口红/gi, name: 'MAC口红' },
+    { regex: /魅可/gi, name: 'MAC' },
+    { regex: /mac/gi, name: 'MAC' },
   ]
-  const matchedBeauty = matchProduct(beautyPatterns)
-  if (matchedBeauty) {
-    return {
-      name: matchedBeauty,
-      brand: '高端美妆',
-      category: '美妆',
-      confidence: Math.min(confidence / 100 + 0.1, 1),
-      matchedBy: '美妆产品'
+  for (const p of beautyPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: '高端美妆',
+        category: '美妆',
+        confidence: Math.min(baseConfidence + 0.2, 1),
+        matchedBy: '美妆产品'
+      }
     }
   }
 
   // 酒水
-  const winePatterns: [string | RegExp, string][] = [
-    [/飞天\s*茅台/gi, '飞天茅台'],
-    [/(?:贵州\s*)?茅台/gi, '茅台'],
-    [/五粮液/gi, '五粮液'],
-    [/泸州老窖/gi, '泸州老窖'],
-    [/汾酒/gi, '汾酒'],
-    [/洋河\s*(?:梦之蓝|海之蓝)/gi, '洋河'],
+  const winePatterns = [
+    { regex: /飞天\s*茅台/gi, name: '飞天茅台' },
+    { regex: /贵州\s*茅台/gi, name: '茅台' },
+    { regex: /茅台\s*(?:53|500)/gi, name: '茅台' },
+    { regex: /茅台/gi, name: '茅台' },
+    { regex: /五粮液/gi, name: '五粮液' },
+    { regex: /泸州老窖/gi, name: '泸州老窖' },
+    { regex: /汾酒/gi, name: '汾酒' },
+    { regex: /洋河\s*梦之蓝/gi, name: '洋河梦之蓝' },
+    { regex: /洋河\s*海之蓝/gi, name: '洋河海之蓝' },
+    { regex: /洋河/gi, name: '洋河' },
   ]
-  const matchedWine = matchProduct(winePatterns)
-  if (matchedWine) {
-    return {
-      name: matchedWine,
-      brand: matchedWine.includes('茅台') ? '茅台' : '白酒',
-      category: '酒水',
-      confidence: Math.min(confidence / 100 + 0.1, 1),
-      matchedBy: '酒水'
+  for (const p of winePatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: p.name.includes('茅台') ? '茅台' : '白酒',
+        category: '酒水',
+        confidence: Math.min(baseConfidence + 0.2, 1),
+        matchedBy: '酒水'
+      }
     }
   }
 
   // 母婴
-  const babyPatterns: [string | RegExp, string][] = [
-    [/爱他美/gi, '爱他美奶粉'],
-    [/美素佳儿/gi, '美素佳儿'],
-    [/惠氏/gi, '惠氏'],
-    [/雅培/gi, '雅培'],
-    [/美赞臣/gi, '美赞臣'],
-    [/花王\s*(?:纸尿裤)?/gi, '花王纸尿裤'],
-    [/好奇/gi, '好奇纸尿裤'],
-    [/帮宝适/gi, '帮宝适'],
+  const babyPatterns = [
+    { regex: /爱他美/gi, name: '爱他美奶粉' },
+    { regex: /美素佳儿/gi, name: '美素佳儿' },
+    { regex: /惠氏/gi, name: '惠氏' },
+    { regex: /雅培/gi, name: '雅培' },
+    { regex: /美赞臣/gi, name: '美赞臣' },
+    { regex: /花王\s*纸尿裤/gi, name: '花王纸尿裤' },
+    { regex: /花王/gi, name: '花王' },
+    { regex: /好奇\s*纸尿裤/gi, name: '好奇纸尿裤' },
+    { regex: /好奇/gi, name: '好奇' },
+    { regex: /帮宝适/gi, name: '帮宝适' },
   ]
-  const matchedBaby = matchProduct(babyPatterns)
-  if (matchedBaby) {
-    return {
-      name: matchedBaby,
-      brand: '母婴用品',
-      category: '母婴',
-      confidence: Math.min(confidence / 100 + 0.1, 1),
-      matchedBy: '母婴用品'
+  for (const p of babyPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: '母婴用品',
+        category: '母婴',
+        confidence: Math.min(baseConfidence + 0.2, 1),
+        matchedBy: '母婴用品'
+      }
     }
   }
 
   // 食品饮料
-  const foodPatterns: [string | RegExp, string][] = [
-    [/农夫山泉/gi, '农夫山泉'],
-    [/可口可乐/gi, '可口可乐'],
-    [/百事可乐/gi, '百事可乐'],
-    [/元气森林/gi, '元气森林'],
-    [/娃哈哈/gi, '娃哈哈'],
-    [/康师傅/gi, '康师傅'],
-    [/奥利奥/gi, '奥利奥'],
-    [/德芙/gi, '德芙巧克力'],
-    [/费列罗/gi, '费列罗'],
-    [/乐事\s*薯片/gi, '乐事薯片'],
-    [/伊利/gi, '伊利'],
-    [/蒙牛/gi, '蒙牛'],
+  const foodPatterns = [
+    { regex: /农夫山泉/gi, name: '农夫山泉' },
+    { regex: /可口可乐/gi, name: '可口可乐' },
+    { regex: /百事可乐/gi, name: '百事可乐' },
+    { regex: /可乐/gi, name: '可乐' },
+    { regex: /元气森林/gi, name: '元气森林' },
+    { regex: /娃哈哈/gi, name: '娃哈哈' },
+    { regex: /康师傅/gi, name: '康师傅' },
+    { regex: /统一\s*方便面/gi, name: '统一方便面' },
+    { regex: /今麦郎/gi, name: '今麦郎' },
+    { regex: /奥利奥/gi, name: '奥利奥' },
+    { regex: /德芙\s*巧克力/gi, name: '德芙巧克力' },
+    { regex: /德芙/gi, name: '德芙' },
+    { regex: /费列罗/gi, name: '费列罗' },
+    { regex: /乐事\s*薯片/gi, name: '乐事薯片' },
+    { regex: /乐事/gi, name: '乐事' },
+    { regex: /可比克/gi, name: '可比克' },
+    { regex: /伊利\s*牛奶/gi, name: '伊利牛奶' },
+    { regex: /伊利/gi, name: '伊利' },
+    { regex: /蒙牛/gi, name: '蒙牛' },
+    { regex: /光明\s*牛奶/gi, name: '光明牛奶' },
   ]
-  const matchedFood = matchProduct(foodPatterns)
-  if (matchedFood) {
-    return {
-      name: matchedFood,
-      brand: '食品饮料',
-      category: '食品',
-      confidence: Math.min(confidence / 100 + 0.1, 1),
-      matchedBy: '食品饮料'
+  for (const p of foodPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: '食品饮料',
+        category: '食品',
+        confidence: Math.min(baseConfidence + 0.2, 1),
+        matchedBy: '食品饮料'
+      }
     }
   }
 
-  // 关键词匹配
+  // 茶叶/保健品
+  const healthPatterns = [
+    { regex: /小罐茶/gi, name: '小罐茶' },
+    { regex: /竹叶青/gi, name: '竹叶青' },
+    { regex: /龙井/gi, name: '龙井' },
+    { regex: /碧螺春/gi, name: '碧螺春' },
+    { regex: /铁观音/gi, name: '铁观音' },
+    { regex: /燕窝/gi, name: '燕窝' },
+    { regex: /冬虫夏草/gi, name: '冬虫夏草' },
+    { regex: /人参/gi, name: '人参' },
+  ]
+  for (const p of healthPatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: '保健品',
+        category: '保健品',
+        confidence: Math.min(baseConfidence + 0.2, 1),
+        matchedBy: '保健品'
+      }
+    }
+  }
+
+  // 家电
+  const appliancePatterns = [
+    { regex: /格力\s*空调/gi, name: '格力空调' },
+    { regex: /格力/gi, name: '格力' },
+    { regex: /美的\s*空调/gi, name: '美的空调' },
+    { regex: /美的/gi, name: '美的' },
+    { regex: /海尔\s*冰箱/gi, name: '海尔冰箱' },
+    { regex: /海尔/gi, name: '海尔' },
+    { regex: /飞利浦\s*吹风机/gi, name: '飞利浦吹风机' },
+    { regex: /飞科\s*吹风机/gi, name: '飞科吹风机' },
+    { regex: /吹风机/gi, name: '吹风机' },
+    { regex: /飞利浦/gi, name: '飞利浦' },
+    { regex: /飞科/gi, name: '飞科' },
+  ]
+  for (const p of appliancePatterns) {
+    if (matchesRegex(p.regex)) {
+      return {
+        name: p.name,
+        brand: p.name.includes('格力') ? '格力' : p.name.includes('美的') ? '美的' : p.name.includes('海尔') ? '海尔' : '家电',
+        category: '家电',
+        confidence: Math.min(baseConfidence + 0.2, 1),
+        matchedBy: '家电'
+      }
+    }
+  }
+
+  // 使用提取的关键词作为备选
   if (productKeywords.length > 0) {
-    let brand = ''
+    // 尝试从关键词中提取品牌
+    let brand = '综合'
     for (const [key, value] of Object.entries(brandMap)) {
       if (cleanText.includes(key.toLowerCase()) || cleanWords.includes(key.toLowerCase())) {
         brand = value
@@ -843,20 +984,50 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
       }
     }
     
-    return {
-      name: productKeywords[0],
-      brand: brand || '未知',
-      category: '综合',
-      confidence: Math.min(confidence / 100, 0.5),
-      matchedBy: '关键词'
+    // 如果有关键词，至少返回第一个匹配的商品
+    const keywordName = productKeywords[0]
+    if (keywordName) {
+      return {
+        name: keywordName,
+        brand: brand,
+        category: '综合',
+        confidence: Math.min(baseConfidence, 0.5), // 降低置信度要求
+        matchedBy: '关键词匹配'
+      }
     }
   }
 
+  // 最后尝试：直接从 OCR 文本中提取品牌关键词
+  // 检查是否有任何已知品牌词
+  const anyBrandPatterns = [
+    { pattern: /iphone|ipad|macbook|airpods|apple/gi, name: 'Apple产品' },
+    { pattern: /huawei|华为|mate|pura/gi, name: '华为产品' },
+    { pattern: /xiaomi|小米|redmi|红米/gi, name: '小米产品' },
+    { pattern: /三星|samsung|galaxy/gi, name: '三星产品' },
+    { pattern: /dyson|戴森/gi, name: '戴森产品' },
+    { pattern: /nike|耐克|adidas|阿迪达斯/gi, name: '运动产品' },
+    { pattern: /茅台|五粮液|泸州老窖/gi, name: '酒水' },
+  ]
+  
+  for (const bp of anyBrandPatterns) {
+    bp.pattern.lastIndex = 0
+    if (bp.pattern.test(text) || bp.pattern.test(cleanText)) {
+      return {
+        name: bp.name,
+        brand: bp.name.replace('产品', '').replace('运动', '').replace('酒水', '白酒'),
+        category: '综合',
+        confidence: 0.4, // 有品牌识别，给一个合理的置信度
+        matchedBy: '品牌识别'
+      }
+    }
+  }
+
+  // 完全无法识别
   return {
     name: '未知商品',
     brand: '',
     category: '综合',
-    confidence: confidence / 100,
+    confidence: 0.2,
     matchedBy: '未匹配'
   }
 }

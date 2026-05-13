@@ -65,11 +65,11 @@ async function handleRecognize() {
     return
   }
 
-  // 如果既没有图片也没有关键词
-  if (!keyword.value.trim() && !imageUrl.value) {
-    showToast('请输入商品名称或拍照')
-    return
-  }
+    // 如果既没有图片也没有关键词
+    if (!keyword.value.trim() && !imageUrl.value) {
+      showToast('请输入商品名称或拍照')
+      return
+    }
 
   recognizing.value = true
   ocrProgress.value = 0
@@ -85,6 +85,7 @@ async function handleRecognize() {
   try {
     let productName = keyword.value.trim()
     let useBackendFallback = false
+    let rawOcrTextContent = ''
 
     // 如果有图片，进行 OCR 识别
     if (imageUrl.value) {
@@ -94,6 +95,7 @@ async function handleRecognize() {
         const ocrResult = await extractTextFromImage(imageUrl.value, updateProgress)
         
         rawOcrText.value = ocrResult.text
+        rawOcrTextContent = ocrResult.text
         console.log('📝 OCR 识别结果:', ocrResult)
         console.log('🎯 识别的文字:', ocrResult.text)
         console.log('🏷️ 提取的关键词:', ocrResult.productKeywords)
@@ -103,8 +105,8 @@ async function handleRecognize() {
         const generated = generateProductNameFromOcr(ocrResult)
         console.log('🤖 AI 解析结果:', generated)
 
-        // 如果识别成功
-        if (generated.name !== '未知商品' && generated.confidence > 0.3) {
+        // 如果识别成功（放宽条件：只要不是"未知商品"就算成功）
+        if (generated.name !== '未知商品') {
           productName = generated.name
           recognizeResult.value = {
             name: generated.name,
@@ -127,7 +129,25 @@ async function handleRecognize() {
             })
           }, 1000)
         } else {
-          // 识别置信度不够
+          // 识别为未知商品，尝试使用 OCR 原始文字作为搜索关键词
+          console.log('🔄 商品未匹配，尝试使用原始 OCR 文字')
+          
+          // 从 OCR 文字中提取可能有用的关键词
+          const ocrText = ocrResult.text.trim()
+          if (ocrText && ocrText.length > 1 && ocrText.length < 100) {
+            // OCR 识别出了文字，尝试用它作为搜索词
+            productName = ocrText
+            showToast({ message: `使用图片文字搜索：${ocrText.slice(0, 20)}...`, type: 'info' })
+            setTimeout(() => {
+              router.push({
+                name: 'Compare',
+                query: { keyword: ocrText }
+              })
+            }, 1000)
+            return // 直接返回，不再继续
+          }
+          
+          // 如果 OCR 文字无效，使用输入的关键词
           useBackendFallback = true
         }
       } catch (ocrError: any) {
