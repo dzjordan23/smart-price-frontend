@@ -15,6 +15,7 @@ const ocrProgress = ref(0)
 const ocrStatus = ref('')
 const recognizeResult = ref<any>(null)
 const rawOcrText = ref('')
+const showDebug = ref(false) // 显示调试信息
 
 // 拍照/选择图片（H5 用 input 模拟）
 function handleChooseImage() {
@@ -67,18 +68,27 @@ async function handleRecognize() {
           ocrProgress.value = Math.round(progress.progress * 100)
           ocrStatus.value = progress.status === 'recognizing text'
             ? '识别文字中...'
-            : '加载模型中...'
+            : progress.status === 'loading tesseract core'
+            ? '加载识别引擎...'
+            : progress.status === 'initializing tesseract'
+            ? '初始化模型...'
+            : progress.status === 'loading language traineddata'
+            ? '加载语言包...'
+            : '处理中...'
         })
 
         rawOcrText.value = ocrResult.text
-        console.log('OCR 识别结果:', ocrResult)
+        console.log('🔍 OCR 原始识别结果:', ocrResult)
+        console.log('📝 识别的文字:', ocrResult.text)
+        console.log('🎯 提取的关键词:', ocrResult.productKeywords)
+        console.log('📊 OCR 置信度:', ocrResult.confidence)
 
         // 根据 OCR 结果生成商品名称
         const generated = generateProductNameFromOcr(ocrResult)
-        console.log('解析的商品信息:', generated)
+        console.log('🤖 AI 解析结果:', generated)
 
         // 如果有识别结果且置信度足够，使用识别结果
-        if (generated.name !== '未知商品' && generated.confidence > 0.5) {
+        if (generated.name !== '未知商品' && generated.confidence > 0.3) {
           productName = generated.name
           recognizeResult.value = {
             name: generated.name,
@@ -87,31 +97,45 @@ async function handleRecognize() {
             spec: '',
             confidence: generated.confidence,
             rawText: ocrResult.text,
-            productKeywords: ocrResult.productKeywords
+            productKeywords: ocrResult.productKeywords,
+            matchedBy: generated.matchedBy,
+            ocrConfidence: ocrResult.confidence
           }
-        } else if (keyword.value.trim()) {
-          // 如果 OCR 结果不理想但有输入关键词，使用关键词
-          const keywordResult = await fetchRecognize(keyword.value)
-          recognizeResult.value = keywordResult.recognized || keywordResult
         } else {
-          // OCR 无法识别，显示原始文本让用户确认
-          showToast({ message: '未能识别商品，请手动输入', type: 'warning' })
-          recognizeResult.value = {
-            name: '未能识别',
-            brand: '',
-            category: '综合',
-            spec: '',
-            confidence: 0.1,
-            rawText: ocrResult.text,
-            suggestion: '请手动输入商品名称'
+          // OCR 识别效果不好，尝试使用后端 API
+          console.log('🔄 OCR 识别置信度不足，尝试后端 API...')
+          
+          // 如果有提取的关键词，尝试用关键词搜索
+          if (ocrResult.productKeywords.length > 0) {
+            try {
+              const backendResult = await fetchRecognize(ocrResult.productKeywords[0])
+              if (backendResult?.recognized?.name && backendResult.recognized.name !== '未知商品') {
+                showToast({ message: '通过后端识别成功', type: 'success' })
+                recognizeResult.value = {
+                  ...backendResult.recognized,
+                  rawText: ocrResult.text,
+                  productKeywords: ocrResult.productKeywords,
+                  matchedBy: '后端API'
+                }
+                productName = backendResult.recognized.name
+              } else {
+                throw new Error('后端也未能识别')
+              }
+            } catch (backendError) {
+              console.log('后端识别也失败，显示原始结果让用户确认')
+              showWarningResult(ocrResult, generated)
+            }
+          } else {
+            showWarningResult(ocrResult, generated)
           }
         }
       } catch (ocrError: any) {
-        console.error('OCR 失败:', ocrError)
+        console.error('❌ OCR 失败:', ocrError)
         // OCR 失败时，如果有关键词则使用关键词识别
         if (keyword.value.trim()) {
           const result = await fetchRecognize(keyword.value)
           recognizeResult.value = result.recognized || result
+          productName = keyword.value
         } else {
           showToast({ message: '图片识别失败，请手动输入商品名称', type: 'fail' })
           recognizeResult.value = {
@@ -133,7 +157,7 @@ async function handleRecognize() {
     }
 
     // 如果识别成功，自动跳转到比价
-    if (recognizeResult.value?.name && recognizeResult.value.name !== '识别失败' && recognizeResult.value.name !== '未能识别') {
+    if (recognizeResult.value?.name && recognizeResult.value.name !== '识别失败' && recognizeResult.value.name !== '未能识别' && recognizeResult.value.name !== '未知商品') {
       showToast({ message: `识别成功：${recognizeResult.value.name}`, type: 'success' })
       setTimeout(() => {
         router.push({
@@ -152,16 +176,33 @@ async function handleRecognize() {
   }
 }
 
-// 手动开始比价
-function startCompare() {
-  if (!recognizeResult.value?.name || recognizeResult.value.name === '识别失败') {
-    showToast('请先识别商品或手动输入商品名称')
+// 显示警告结果（OCR 未能准确识别）
+function showWarningResult(ocrResult: any, generated: any) {
+  showToast({ message: '未能准确识别，请确认商品名称', type: 'warning' })
+  recognizeResult.value = {
+    name: generated.name,
+    brand: generated.brand,
+    category: generated.category,
+    spec: '',
+    confidence: generated.confidence,
+    rawText: ocrResult.text,
+    productKeywords: ocrResult.productKeywords,
+    matchedBy: generated.matchedBy,
+    ocrConfidence: ocrResult.confidence,
+    suggestion: '请确认商品名称是否正确，或尝试手动输入'
+  }
+}
+
+// 手动确认商品名称
+function confirmProduct() {
+  if (!keyword.value.trim()) {
+    showToast('请输入商品名称')
     return
   }
-
+  
   router.push({
     name: 'Compare',
-    query: { keyword: recognizeResult.value.name }
+    query: { keyword: keyword.value.trim() }
   })
 }
 
@@ -240,7 +281,8 @@ function quickRecognize(item: string) {
     <!-- 识别结果 -->
     <div v-if="recognizeResult" class="result-area card glow-border">
       <h4>
-        <van-icon name="checked" color="var(--color-success)" />
+        <van-icon v-if="recognizeResult.name !== '未知商品' && recognizeResult.name !== '未能识别'" name="checked" color="var(--color-success)" />
+        <van-icon v-else name="warning-o" color="var(--color-warning)" />
         识别结果
       </h4>
 
@@ -261,6 +303,24 @@ function quickRecognize(item: string) {
         <div v-if="recognizeResult.category" class="result-row">
           <span class="label">分类</span>
           <span class="value">{{ recognizeResult.category }}</span>
+        </div>
+
+        <!-- 识别方式 -->
+        <div v-if="recognizeResult.matchedBy" class="result-row">
+          <span class="label">匹配方式</span>
+          <span class="value match-method">{{ recognizeResult.matchedBy }}</span>
+        </div>
+
+        <!-- OCR 置信度 -->
+        <div v-if="recognizeResult.ocrConfidence" class="result-row">
+          <span class="label">图片清晰度</span>
+          <span class="value confidence" :class="{
+            high: recognizeResult.ocrConfidence > 80,
+            medium: recognizeResult.ocrConfidence > 50 && recognizeResult.ocrConfidence <= 80,
+            low: recognizeResult.ocrConfidence <= 50
+          }">
+            {{ recognizeResult.ocrConfidence.toFixed(0) }}%
+          </span>
         </div>
 
         <!-- 识别置信度 -->
@@ -296,10 +356,17 @@ function quickRecognize(item: string) {
             </van-tag>
           </div>
         </div>
+
+        <!-- 建议 -->
+        <div v-if="recognizeResult.suggestion" class="result-row suggestion">
+          <span class="label">建议</span>
+          <span class="value suggestion-text">{{ recognizeResult.suggestion }}</span>
+        </div>
       </div>
 
+      <!-- 识别成功：直接比价 -->
       <van-button
-        v-if="recognizeResult.name && recognizeResult.name !== '识别失败' && recognizeResult.name !== '未能识别'"
+        v-if="recognizeResult.name && recognizeResult.name !== '识别失败' && recognizeResult.name !== '未能识别' && recognizeResult.name !== '未知商品'"
         type="primary"
         round
         block
@@ -310,11 +377,30 @@ function quickRecognize(item: string) {
         全网比价 →
       </van-button>
 
-      <!-- 手动输入提示 -->
+      <!-- 识别不成功：手动输入确认 -->
       <div v-else class="manual-input-tip">
         <van-icon name="warning-o" color="var(--color-warning)" />
         <span>{{ recognizeResult.suggestion || '未能自动识别，请手动输入商品名称' }}</span>
       </div>
+
+      <!-- 手动确认按钮 -->
+      <van-button
+        v-if="recognizeResult.name === '未知商品' || recognizeResult.name === '未能识别'"
+        plain
+        round
+        block
+        size="small"
+        class="confirm-btn"
+        @click="confirmProduct"
+      >
+        使用输入框的名称搜索
+      </van-button>
+    </div>
+
+    <!-- 调试信息（开发时可见） -->
+    <div v-if="showDebug && rawOcrText" class="debug-info card">
+      <h4>调试信息</h4>
+      <pre>{{ JSON.stringify({ rawText: rawOcrText, keywords: recognizeResult?.productKeywords }, null, 2) }}</pre>
     </div>
 
     <!-- 热门商品快捷入口 -->
@@ -352,12 +438,29 @@ function quickRecognize(item: string) {
 <script lang="ts">
 // 热门商品配置
 const quickItems = [
+  // 手机
   { name: 'iPhone 16', icon: '📱', color: 'linear-gradient(135deg, #667eea, #764ba2)' },
-  { name: 'MacBook Air', icon: '💻', color: 'linear-gradient(135deg, #4facfe, #00f2fe)' },
+  { name: 'iPhone 15', icon: '📱', color: 'linear-gradient(135deg, #5b86e5, #36d1dc)' },
   { name: '华为Mate60', icon: '📱', color: 'linear-gradient(135deg, #f093fb, #f5576c)' },
+  { name: '小米14', icon: '📱', color: 'linear-gradient(135deg, #ffecd2, #fcb69f)' },
+  // 电脑
+  { name: 'MacBook Air', icon: '💻', color: 'linear-gradient(135deg, #4facfe, #00f2fe)' },
+  { name: 'MacBook Pro', icon: '💻', color: 'linear-gradient(135deg, #43e97b, #38f9d7)' },
+  // 个护
   { name: '戴森吹风机', icon: '💨', color: 'linear-gradient(135deg, #fa709a, #fee140)' },
-  { name: 'Switch', icon: '🎮', color: 'linear-gradient(135deg, #a8edea, #fed6e3)' },
-  { name: '茅台', icon: '🍶', color: 'linear-gradient(135deg, #ff9a9e, #fecfef)' },
+  { name: 'AirPods Pro', icon: '🎧', color: 'linear-gradient(135deg, #a8edea, #fed6e3)' },
+  // 游戏
+  { name: 'Switch', icon: '🎮', color: 'linear-gradient(135deg, #ff9a9e, #fecfef)' },
+  { name: 'PS5', icon: '🎮', color: 'linear-gradient(135deg, #667eea, #764ba2)' },
+  // 酒水
+  { name: '茅台', icon: '🍶', color: 'linear-gradient(135deg, #f5af19, #f12711)' },
+  { name: '五粮液', icon: '🍶', color: 'linear-gradient(135deg, #c471f5, #fa71cd)' },
+  // 运动
+  { name: '耐克运动鞋', icon: '👟', color: 'linear-gradient(135deg, #f093fb, #f5576c)' },
+  { name: '阿迪达斯', icon: '👟', color: 'linear-gradient(135deg, #4facfe, #00f2fe)' },
+  // 美妆
+  { name: 'SK-II神仙水', icon: '💄', color: 'linear-gradient(135deg, #fa709a, #fee140)' },
+  { name: '雅诗兰黛', icon: '💄', color: 'linear-gradient(135deg, #a18cd1, #fbc2eb)' },
 ]
 export default {
   data() {
@@ -571,6 +674,50 @@ export default {
   border-radius: $radius-sm;
   color: var(--color-warning);
   font-size: $font-sm;
+}
+
+.confirm-btn {
+  margin-top: $spacing-sm;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.match-method {
+  font-size: $font-xs;
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.suggestion {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: $spacing-xs;
+  
+  .suggestion-text {
+    font-size: $font-xs;
+    color: var(--text-muted);
+  }
+}
+
+.debug-info {
+  margin-top: $spacing-md;
+  
+  h4 {
+    font-size: $font-sm;
+    color: var(--color-danger);
+    margin-bottom: $spacing-sm;
+  }
+  
+  pre {
+    font-size: $font-xs;
+    background: var(--bg-secondary);
+    padding: $spacing-sm;
+    border-radius: $radius-sm;
+    overflow-x: auto;
+    color: var(--text-muted);
+  }
 }
 
 .quick-entry {

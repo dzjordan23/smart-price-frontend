@@ -67,7 +67,7 @@ export async function extractTextFromImage(
     }
 
     // 从识别的文本中提取商品关键词
-    const productKeywords = extractProductKeywords(text)
+    const productKeywords = extractProductKeywords(text, words)
 
     return {
       text,
@@ -81,225 +81,820 @@ export async function extractTextFromImage(
   }
 }
 
+// =============== 商品数据库 - 支持更多常见商品 ===============
+interface ProductPattern {
+  patterns: RegExp[]           // 匹配模式（正则）
+  name: string                 // 标准商品名称
+  brand: string                // 品牌
+  category: string             // 分类
+  aliases?: string[]           // 别名/常见称呼
+}
+
+const PRODUCT_DATABASE: ProductPattern[] = [
+  // ===== 手机 =====
+  {
+    patterns: [/(?:iphone|ｉｐｈｏｎｅ)\s*1[3456](?:\s*pro)?(?:\s*(?:max|pro\s*max))?/gi],
+    name: 'iPhone',
+    brand: 'Apple',
+    category: '手机',
+    aliases: ['苹果手机', '爱疯']
+  },
+  {
+    patterns: [/macbook\s*(?:air|pro)/gi],
+    name: 'MacBook',
+    brand: 'Apple',
+    category: '电脑'
+  },
+  {
+    patterns: [/ipad\s*(?:pro|air|mini)?/gi],
+    name: 'iPad',
+    brand: 'Apple',
+    category: '平板'
+  },
+  {
+    patterns: [/airpods?(?:\s*(?:pro|2|3))?/gi],
+    name: 'AirPods',
+    brand: 'Apple',
+    category: '耳机'
+  },
+  {
+    patterns: [/apple\s*(?:watch|手表)/gi],
+    name: 'Apple Watch',
+    brand: 'Apple',
+    category: '手表'
+  },
+  
+  // ===== 华为 =====
+  {
+    patterns: [/mate\s*60/i, /mate60/i, /mate\s*50/i, /mate50/i],
+    name: '华为Mate',
+    brand: '华为',
+    category: '手机'
+  },
+  {
+    patterns: [/pura\s*70/i, /pura70/i, /pura\s*80/i, /pura80/i],
+    name: '华为Pura',
+    brand: '华为',
+    category: '手机'
+  },
+  {
+    patterns: [/华为/i, /huawei/i],
+    name: '华为',
+    brand: '华为',
+    category: '手机'
+  },
+  
+  // ===== 小米 =====
+  {
+    patterns: [/小米\s*(?:14|13|12|11)?/gi, /xiaomi\s*(?:14|13|12|11)?/gi],
+    name: '小米',
+    brand: '小米',
+    category: '手机'
+  },
+  {
+    patterns: [/redmi\s*(?:k\d+|note)/gi, /红米/gi],
+    name: 'Redmi',
+    brand: '小米',
+    category: '手机'
+  },
+  
+  // ===== 三星 =====
+  {
+    patterns: [/galaxy\s*(?:s\d+|z\s*(?:fold|flip))/gi, /三星/gi, /samsumg|samsung/gi],
+    name: '三星',
+    brand: '三星',
+    category: '手机'
+  },
+  
+  // ===== OPPO/Vivo =====
+  {
+    patterns: [/oppo/gi, /vivo/gi, /荣耀/gi, /honor/gi],
+    name: 'OPPO/Vivo',
+    brand: 'OPPO',
+    category: '手机'
+  },
+  
+  // ===== 戴森 =====
+  {
+    patterns: [/戴森\s*(?:吹风机|卷发棒)?/gi, /dyson\s*(?:airwrap|supersonic)?/gi, /hd15|hd03/gi],
+    name: '戴森吹风机',
+    brand: '戴森',
+    category: '个护',
+    aliases: ['dyson吹风机']
+  },
+  {
+    patterns: [/戴森\s*吸尘器/gi, /dyson\s*v(10|12|15|8)/gi, /dyson\s*vacuum/gi],
+    name: '戴森吸尘器',
+    brand: '戴森',
+    category: '家电'
+  },
+  
+  // ===== 游戏机 =====
+  {
+    patterns: [/nintendo\s*switch|ns|任天堂/gi],
+    name: 'Nintendo Switch',
+    brand: 'Nintendo',
+    category: '游戏机'
+  },
+  {
+    patterns: [/ps5|playstation\s*5|ps4|playstation\s*4/gi],
+    name: 'PS5',
+    brand: '索尼',
+    category: '游戏机'
+  },
+  {
+    patterns: [/xbox/gi],
+    name: 'Xbox',
+    brand: '微软',
+    category: '游戏机'
+  },
+  
+  // ===== 酒水 =====
+  {
+    patterns: [/飞天\s*茅台|茅台\s*(?:53|500)/gi, /(?:贵州\s*)?茅台/gi],
+    name: '茅台',
+    brand: '茅台',
+    category: '酒水'
+  },
+  {
+    patterns: [/五粮液/gi],
+    name: '五粮液',
+    brand: '五粮液',
+    category: '酒水'
+  },
+  {
+    patterns: [/泸州老窖/gi],
+    name: '泸州老窖',
+    brand: '泸州老窖',
+    category: '酒水'
+  },
+  
+  // ===== 食品饮料 =====
+  {
+    patterns: [/农夫山泉/gi, /农夫果园/gi],
+    name: '农夫山泉',
+    brand: '农夫山泉',
+    category: '饮料'
+  },
+  {
+    patterns: [/可口可乐/gi, /百事可乐/gi, /可乐/gi],
+    name: '可乐',
+    brand: '可口可乐',
+    category: '饮料'
+  },
+  {
+    patterns: [/娃哈哈/gi],
+    name: '娃哈哈',
+    brand: '娃哈哈',
+    category: '饮料'
+  },
+  {
+    patterns: [/伊利/gi, /蒙牛/gi, /光明\s*牛奶/gi],
+    name: '牛奶',
+    brand: '伊利',
+    category: '乳制品'
+  },
+  {
+    patterns: [/旺旺/gi, /雪饼/gi, /仙贝/gi],
+    name: '旺旺雪饼',
+    brand: '旺旺',
+    category: '零食'
+  },
+  {
+    patterns: [/奥利奥/gi],
+    name: '奥利奥',
+    brand: '亿滋',
+    category: '零食'
+  },
+  {
+    patterns: [/德芙/gi, /巧克力/gi],
+    name: '巧克力',
+    brand: '德芙',
+    category: '零食'
+  },
+  {
+    patterns: [/薯片/gi, /乐事/gi, /可比克/gi],
+    name: '薯片',
+    brand: '乐事',
+    category: '零食'
+  },
+  {
+    patterns: [/康师傅/gi, /统一\s*方便面/gi, /今麦郎/gi],
+    name: '方便面',
+    brand: '康师傅',
+    category: '食品'
+  },
+  
+  // ===== 运动品牌 =====
+  {
+    patterns: [/耐克|nike/gi, /aj|air\s*jordan/gi],
+    name: '耐克',
+    brand: '耐克',
+    category: '运动'
+  },
+  {
+    patterns: [/阿迪达斯|adidas/gi, /三叶草/gi],
+    name: '阿迪达斯',
+    brand: '阿迪达斯',
+    category: '运动'
+  },
+  {
+    patterns: [/安踏/gi, /李宁/gi, /361/gi],
+    name: '安踏',
+    brand: '安踏',
+    category: '运动'
+  },
+  {
+    patterns: [/新百伦|new\s*balance/gi, /NB/gi],
+    name: 'New Balance',
+    brand: 'New Balance',
+    category: '运动'
+  },
+  
+  // ===== 化妆品/护肤品 =====
+  {
+    patterns: [/雅诗兰黛/gi, /兰蔻/gi, /sk-?ii/gi, /神仙水/gi],
+    name: '高端护肤品',
+    brand: '雅诗兰黛',
+    category: '美妆'
+  },
+  {
+    patterns: [/兰蔻\s*(?:小黑瓶|粉水)/gi],
+    name: '兰蔻粉水',
+    brand: '兰蔻',
+    category: '美妆'
+  },
+  {
+    patterns: [/海蓝之谜|lamer/gi],
+    name: '海蓝之谜',
+    brand: '海蓝之谜',
+    category: '美妆'
+  },
+  {
+    patterns: [/迪奥\d+/gi, /dior/gi, /香奈儿|chanel/gi, /YSL/gi],
+    name: '奢侈品美妆',
+    brand: '迪奥',
+    category: '美妆'
+  },
+  {
+    patterns: [/mac\s*(?:子弹头|口红)/gi, /魅可/gi],
+    name: 'MAC口红',
+    brand: 'MAC',
+    category: '美妆'
+  },
+  
+  // ===== 家电 =====
+  {
+    patterns: [/小米\s*(?:空调|冰箱|洗衣机|电视)/gi],
+    name: '小米家电',
+    brand: '小米',
+    category: '家电'
+  },
+  {
+    patterns: [/格力|美的|海尔/gi],
+    name: '空调',
+    brand: '格力',
+    category: '家电'
+  },
+  {
+    patterns: [/飞利浦|飞科/gi, /吹风机/gi],
+    name: '吹风机',
+    brand: '飞利浦',
+    category: '个护'
+  },
+  {
+    patterns: [/飞利浦\s*(?:电动牙刷|剃须刀)/gi, /oral-?b/gi],
+    name: '电动牙刷',
+    brand: '飞利浦',
+    category: '个护'
+  },
+  {
+    patterns: [/戴森\s*(?:吹风机|卷发)/gi, /dyson/gi],
+    name: '戴森吹风机',
+    brand: '戴森',
+    category: '个护'
+  },
+  
+  // ===== 母婴 =====
+  {
+    patterns: [/爱他美|美素佳儿|惠氏|雅培/gi],
+    name: '婴儿奶粉',
+    brand: '爱他美',
+    category: '母婴'
+  },
+  {
+    patterns: [/花王|好奇|帮宝适|大王\s*(?:天使)?/gi],
+    name: '纸尿裤',
+    brand: '花王',
+    category: '母婴'
+  },
+  
+  // ===== 数码配件 =====
+  {
+    patterns: [/小米\s*(?:充电宝|移动电源|手环|耳机)/gi],
+    name: '小米配件',
+    brand: '小米',
+    category: '配件'
+  },
+  {
+    patterns: [/airpods?(?:\s*pro)?/gi, /airpod/gi],
+    name: 'AirPods',
+    brand: 'Apple',
+    category: '耳机'
+  },
+  {
+    patterns: [/索尼\s*(?:耳机|降噪豆)/gi, /sony\s*wh/gi],
+    name: '索尼耳机',
+    brand: '索尼',
+    category: '耳机'
+  },
+  {
+    patterns: [/beats/gi],
+    name: 'Beats耳机',
+    brand: 'Beats',
+    category: '耳机'
+  },
+  
+  // ===== 茶叶/保健品 =====
+  {
+    patterns: [/小罐茶|竹叶青|龙井|碧螺春|铁观音/gi],
+    name: '茶叶',
+    brand: '小罐茶',
+    category: '茶'
+  },
+  {
+    patterns: [/燕窝/gi],
+    name: '燕窝',
+    brand: '燕窝',
+    category: '保健品'
+  },
+  {
+    patterns: [/冬虫夏草|人参|鹿茸/gi],
+    name: '滋补品',
+    brand: '滋补品',
+    category: '保健品'
+  }
+]
+
 /**
- * 从文本中提取商品关键词
- * 匹配常见的商品名称、品牌、型号等
+ * 从文本中提取商品关键词（增强版）
  */
-function extractProductKeywords(text: string): string[] {
+function extractProductKeywords(text: string, words: string[] = []): string[] {
   const keywords: string[] = []
   const lowerText = text.toLowerCase()
-
-  // 品牌关键词
-  const brands = [
-    'iphone', 'ipad', 'macbook', 'airpods', 'apple',
-    'huawei', '华为', 'mate', 'pura', 'p50', 'p60',
-    'xiaomi', '小米', 'redmi', '红米',
-    'samsung', '三星', 'galaxy',
-    'oppo', 'vivo', '荣耀', 'honor',
-    'dyson', '戴森',
-    'nike', '耐克', 'adidas', '阿迪达斯',
-    'switch', 'ps5', 'playstation', 'xbox',
-    '茅台', '五粮液'
-  ]
-
-  for (const brand of brands) {
-    if (lowerText.includes(brand.toLowerCase())) {
+  
+  // 合并 words 数组形成连续文本，便于短语匹配
+  const combinedWords = words.join('')
+  const combinedLower = combinedWords.toLowerCase()
+  
+  // 1. 使用商品数据库精确匹配
+  for (const product of PRODUCT_DATABASE) {
+    for (const pattern of product.patterns) {
+      // 尝试在原始文本中匹配
+      if (pattern.test(text)) {
+        keywords.push(product.name)
+        // 添加别名
+        if (product.aliases) {
+          keywords.push(...product.aliases)
+        }
+        break
+      }
+      // 尝试在 words 组合文本中匹配（处理 OCR 断字问题）
+      if (pattern.test(combinedWords)) {
+        keywords.push(product.name)
+        break
+      }
+    }
+  }
+  
+  // 2. 数字+品牌组合匹配（处理 "16 Pro" 这样的 OCR 结果）
+  const numberPattern = /(\d+)\s*(?:pro|max|plus)?/gi
+  const numbers = text.match(numberPattern) || []
+  for (const num of numbers) {
+    if (parseInt(num) >= 10 && parseInt(num) <= 20) {
+      // 可能是 iPhone 型号
+      if (lowerText.includes('iphone') || combinedLower.includes('iphone')) {
+        keywords.push(`iPhone ${num}`)
+      }
+    }
+  }
+  
+  // 3. 价格信息（帮助确认商品类别）
+  const priceMatch = text.match(/[¥￥$]?\s*(\d+(?:\.\d{2})?)/)
+  if (priceMatch) {
+    const price = parseFloat(priceMatch[1])
+    if (price >= 5000) keywords.push('高端商品')
+    else if (price >= 1000) keywords.push('中端商品')
+  }
+  
+  // 4. 去除 OCR 空格干扰（如 "i P h o n e"）
+  const cleanText = text.replace(/\s+/g, '')
+  const cleanLower = cleanText.toLowerCase()
+  
+  // 检查去空格后的文本
+  const commonBrands = ['iphone', 'ipad', 'macbook', 'airpods', 'switch', 'ps5', 'dyson', 'nike', 'adidas']
+  for (const brand of commonBrands) {
+    if (cleanLower.includes(brand) && !keywords.some(k => k.toLowerCase().includes(brand))) {
       keywords.push(brand)
     }
   }
-
-  // 型号关键词
-  const models = [
-    // iPhone
-    'iphone 16', 'iphone 15', 'iphone 14', 'iphone 13',
-    'iphone16', 'iphone15', 'iphone14', 'iphone13',
-    'iphone 16 pro', 'iphone 16 pro max',
-    'iphone 15 pro', 'iphone 15 pro max',
-    // Mac
-    'macbook air', 'macbook pro', 'macbook',
-    // iPad
-    'ipad pro', 'ipad air', 'ipad mini', 'ipad',
-    // 华为
-    'mate60', 'mate 60', 'mate50', 'mate 50',
-    'pura70', 'pura 70', 'pura80', 'pura 80',
-    // 小米
-    '小米14', '小米13', '小米12',
-    'redmi k70', 'redmi k60', 'redmi note',
-    // 三星
-    's24', 's23', 's22',
-    'z fold', 'z flip', 'fold',
-    // 戴森
-    '戴森吹风机', 'hd15', 'hd03',
-    '戴森吸尘器', 'v15', 'v12', 'v10',
-    // 游戏机
-    'switch', 'nintendo switch',
-    'ps5', 'ps4',
-    'xbox series x', 'xbox series s',
-    // 酒水
-    '茅台', '飞天茅台', '五粮液',
-    // 运动
-    '耐克', '阿迪达斯', 'aj', 'jordan'
-  ]
-
-  for (const model of models) {
-    if (lowerText.includes(model.toLowerCase())) {
-      // 标准化名称
-      let normalized = model
-      if (model === 'iphone 16' || model === 'iphone16') keywords.push('iPhone 16')
-      else if (model === 'iphone 15' || model === 'iphone15') keywords.push('iPhone 15')
-      else if (model === 'macbook air') keywords.push('MacBook Air')
-      else if (model === 'macbook pro') keywords.push('MacBook Pro')
-      else if (model === 'ipad pro') keywords.push('iPad Pro')
-      else if (model === 'ipad air') keywords.push('iPad Air')
-      else if (model === 'nintendo switch') keywords.push('Nintendo Switch')
-      else if (model === 'switch') keywords.push('Nintendo Switch')
-      else if (model === 'ps5') keywords.push('PS5')
-      else if (model === '戴森吹风机') keywords.push('戴森吹风机')
-      else if (model === '戴森吸尘器') keywords.push('戴森吸尘器')
-      else if (model === '茅台') keywords.push('茅台')
-      else if (model.includes('mate')) keywords.push('华为Mate')
-      else if (model.includes('pura')) keywords.push('华为Pura')
-      else if (model.includes('小米')) keywords.push(model)
-      else keywords.push(model)
-    }
-  }
-
-  // 数字+型号组合（如 "16 Pro Max"）
-  const modelPatterns = [
-    /(\d+)\s*(?:代?|pro|max|plus)?/gi,
-    /(?:第?\s*)?(\d+)\s*(?:代|款|型号)/gi,
-  ]
-
-  for (const pattern of modelPatterns) {
-    const matches = text.match(pattern)
-    if (matches) {
-      keywords.push(...matches)
-    }
-  }
-
-  // 价格信息（帮助确认商品类别）
-  const priceMatch = text.match(/[¥￥]?\s*(\d{3,5})(?:\.\d{2})?/)
-  if (priceMatch) {
-    const price = parseInt(priceMatch[1])
-    // 根据价格区间推断商品类型
-    if (price >= 5000) keywords.push('高端商品')
-    else if (price >= 2000) keywords.push('中端商品')
-  }
-
-  // 去重
+  
   return [...new Set(keywords)]
 }
 
 /**
- * 根据 OCR 结果生成标准商品名称
+ * 根据 OCR 结果生成标准商品名称（增强版智能匹配）
  */
 export function generateProductNameFromOcr(ocrResult: OcrResult): {
   name: string
   brand: string
   category: string
   confidence: number
+  matchedBy: string  // 新增：匹配方式
 } {
-  const { text, productKeywords, confidence } = ocrResult
+  const { text, productKeywords, confidence, words } = ocrResult
 
+  // 清理 OCR 文本（去除空格干扰）
+  const cleanText = text.replace(/\s+/g, '').toLowerCase()
+  const cleanWords = (words || []).map(w => w.replace(/\s+/g, '').toLowerCase()).join('')
+  
   // 品牌映射
   const brandMap: Record<string, string> = {
-    'iphone': 'Apple',
-    'ipad': 'Apple',
-    'macbook': 'Apple',
-    'airpods': 'Apple',
-    'huawei': '华为',
-    '华为': '华为',
-    'mate': '华为',
-    'pura': '华为',
-    'xiaomi': '小米',
-    '小米': '小米',
-    'redmi': '小米',
-    '三星': '三星',
-    'samsung': '三星',
-    'oppo': 'OPPO',
-    'vivo': 'vivo',
-    '荣耀': '荣耀',
-    'honor': '荣耀',
-    '戴森': '戴森',
-    'dyson': '戴森',
-    '耐克': '耐克',
-    'nike': '耐克',
-    '阿迪达斯': '阿迪达斯',
-    'adidas': '阿迪达斯',
-    'switch': 'Nintendo',
-    'ps5': '索尼',
-    'playstation': '索尼',
-    'xbox': '微软',
-    '茅台': '茅台',
-    '五粮液': '五粮液',
+    'iphone': 'Apple', 'ipad': 'Apple', 'macbook': 'Apple', 'airpods': 'Apple',
+    'huawei': '华为', '华为': '华为', 'mate': '华为', 'pura': '华为',
+    'xiaomi': '小米', '小米': '小米', 'redmi': '小米', '红米': '小米',
+    '三星': '三星', 'samsung': '三星',
+    'oppo': 'OPPO', 'vivo': 'vivo', '荣耀': '荣耀', 'honor': '荣耀',
+    '戴森': '戴森', 'dyson': '戴森',
+    '耐克': '耐克', 'nike': '耐克',
+    '阿迪达斯': '阿迪达斯', 'adidas': '阿迪达斯',
+    'switch': 'Nintendo', 'ps5': '索尼', 'playstation': '索尼', 'xbox': '微软',
+    '茅台': '茅台', '五粮液': '五粮液',
   }
 
   // 分类映射
   const categoryMap: Record<string, string> = {
-    'Apple': ['iPhone', 'iPad', 'MacBook', 'AirPods', 'Mac'],
-    '华为': ['Mate', 'Pura', 'P系列', 'Mate系列'],
-    '小米': ['小米手机', '小米笔记本', '小米生态'],
-    '戴森': ['吹风机', '吸尘器', '空气净化器'],
-    'Nintendo': ['Switch', '游戏机'],
-    '索尼': ['PS5', 'PlayStation', '游戏机'],
+    'Apple': '手机/电脑', '华为': '手机', '小米': '手机/数码',
+    '戴森': '家电', 'Nintendo': '游戏机', '索尼': '游戏机',
+    '耐克': '运动', '阿迪达斯': '运动'
   }
 
-  // 识别品牌
-  let brand = ''
-  for (const [key, value] of Object.entries(brandMap)) {
-    if (text.toLowerCase().includes(key.toLowerCase())) {
-      brand = value
-      break
+  // ===== 智能匹配函数 =====
+  const matchProduct = (patterns: [string | RegExp, string][]): string | null => {
+    for (const [pattern, name] of patterns) {
+      if (typeof pattern === 'string') {
+        const p = pattern.toLowerCase()
+        // 原始文本匹配
+        if (cleanText.includes(p) || cleanWords.includes(p)) {
+          return name
+        }
+        // 带空格的 OCR 文本匹配
+        if (text.toLowerCase().includes(p.replace(/\s+/g, ' '))) {
+          return name
+        }
+      } else {
+        // 正则匹配
+        if (pattern.test(text) || pattern.test(cleanText) || pattern.test(cleanWords)) {
+          return name
+        }
+      }
+    }
+    return null
+  }
+
+  // ===== 1. 精确匹配 iPhone 系列（最常见）=====
+  const iphonePatterns: [string | RegExp, string][] = [
+    [/iphone\s*16\s*pro\s*max/gi, 'iPhone 16 Pro Max'],
+    [/iphone\s*16\s*pro/gi, 'iPhone 16 Pro'],
+    [/iphone\s*16/gi, 'iPhone 16'],
+    [/iphone\s*15\s*pro\s*max/gi, 'iPhone 15 Pro Max'],
+    [/iphone\s*15\s*pro/gi, 'iPhone 15 Pro'],
+    [/iphone\s*15/gi, 'iPhone 15'],
+    [/iphone\s*14\s*pro\s*max/gi, 'iPhone 14 Pro Max'],
+    [/iphone\s*14\s*pro/gi, 'iPhone 14 Pro'],
+    [/iphone\s*14/gi, 'iPhone 14'],
+    [/iphone\s*13/gi, 'iPhone 13'],
+    [/iphone\s*12/gi, 'iPhone 12'],
+    // 处理 OCR 空格问题
+    [/iphone16promax|iphone\s*16\s*pro\s*max/gi, 'iPhone 16 Pro Max'],
+    [/iphone16pro/gi, 'iPhone 16 Pro'],
+    [/iphone16/gi, 'iPhone 16'],
+  ]
+  const matchedIphone = matchProduct(iphonePatterns)
+  if (matchedIphone) {
+    return {
+      name: matchedIphone,
+      brand: 'Apple',
+      category: '手机',
+      confidence: Math.min(confidence / 100 + 0.2, 1), // 增加置信度
+      matchedBy: '精确匹配'
     }
   }
 
-  // 生成商品名称
-  let name = '未知商品'
-  const lowerText = text.toLowerCase()
-
-  // 精确匹配
-  if (lowerText.includes('iphone 16 pro max')) name = 'iPhone 16 Pro Max'
-  else if (lowerText.includes('iphone 16 pro')) name = 'iPhone 16 Pro'
-  else if (lowerText.includes('iphone 16')) name = 'iPhone 16'
-  else if (lowerText.includes('iphone 15 pro max')) name = 'iPhone 15 Pro Max'
-  else if (lowerText.includes('iphone 15 pro')) name = 'iPhone 15 Pro'
-  else if (lowerText.includes('iphone 15')) name = 'iPhone 15'
-  else if (lowerText.includes('macbook air')) name = 'MacBook Air'
-  else if (lowerText.includes('macbook pro')) name = 'MacBook Pro'
-  else if (lowerText.includes('ipad pro')) name = 'iPad Pro'
-  else if (lowerText.includes('ipad air')) name = 'iPad Air'
-  else if (lowerText.includes('airpods')) name = 'AirPods'
-  else if (lowerText.includes('mate60') || lowerText.includes('mate 60')) name = '华为Mate60'
-  else if (lowerText.includes('mate50') || lowerText.includes('mate 50')) name = '华为Mate50'
-  else if (lowerText.includes('pura70') || lowerText.includes('pura 70')) name = '华为Pura70'
-  else if (lowerText.includes('小米14')) name = '小米14'
-  else if (lowerText.includes('小米13')) name = '小米13'
-  else if (lowerText.includes('戴森吹风机')) name = '戴森吹风机'
-  else if (lowerText.includes('戴森吸尘器') || lowerText.includes('dyson v')) name = '戴森吸尘器'
-  else if (lowerText.includes('switch') || lowerText.includes('nintendo')) name = 'Nintendo Switch'
-  else if (lowerText.includes('ps5') || lowerText.includes('playstation')) name = 'PS5'
-  else if (lowerText.includes('茅台')) name = '茅台'
-  else if (lowerText.includes('耐克') || lowerText.includes('nike')) name = '耐克'
-  else if (lowerText.includes('阿迪达斯') || lowerText.includes('adidas')) name = '阿迪达斯'
-  else if (productKeywords.length > 0) {
-    name = productKeywords[0]
+  // ===== 2. Apple 产品系列 =====
+  const applePatterns: [string | RegExp, string][] = [
+    [/macbook\s*air/gi, 'MacBook Air'],
+    [/macbook\s*pro/gi, 'MacBook Pro'],
+    [/macbook/gi, 'MacBook'],
+    [/ipad\s*pro/gi, 'iPad Pro'],
+    [/ipad\s*air/gi, 'iPad Air'],
+    [/ipad\s*mini/gi, 'iPad mini'],
+    [/ipad/gi, 'iPad'],
+    [/airpods\s*pro/gi, 'AirPods Pro'],
+    [/airpods(?:\s*2|\s*3)?/gi, 'AirPods'],
+    [/apple\s*watch/gi, 'Apple Watch'],
+    [/(?:imac|mac\s*mini|mac\s*studio)/gi, 'iMac'],
+  ]
+  const matchedApple = matchProduct(applePatterns)
+  if (matchedApple) {
+    return {
+      name: matchedApple,
+      brand: 'Apple',
+      category: matchedApple.includes('Watch') ? '手表' : matchedApple.includes('Pad') ? '平板' : '电脑',
+      confidence: Math.min(confidence / 100 + 0.15, 1),
+      matchedBy: 'Apple产品'
+    }
   }
 
-  // 识别分类
-  let category = '综合'
-  for (const [cat, keywords] of Object.entries(categoryMap)) {
-    for (const kw of keywords) {
-      if (lowerText.includes(kw.toLowerCase())) {
-        category = cat
+  // ===== 3. 华为系列 =====
+  const huaweiPatterns: [string | RegExp, string][] = [
+    [/mate\s*60\s*pro/gi, '华为Mate60 Pro'],
+    [/mate\s*60/gi, '华为Mate60'],
+    [/mate\s*50\s*pro/gi, '华为Mate50 Pro'],
+    [/mate\s*50/gi, '华为Mate50'],
+    [/pura\s*70\s*ultra/gi, '华为Pura70 Ultra'],
+    [/pura\s*70\s*pro/gi, '华为Pura70 Pro'],
+    [/pura\s*70/gi, '华为Pura70'],
+    [/(?:华为|huawei|mate|pura)/gi, '华为'],
+  ]
+  const matchedHuawei = matchProduct(huaweiPatterns)
+  if (matchedHuawei) {
+    return {
+      name: matchedHuawei,
+      brand: '华为',
+      category: '手机',
+      confidence: Math.min(confidence / 100 + 0.15, 1),
+      matchedBy: '华为产品'
+    }
+  }
+
+  // ===== 4. 小米系列 =====
+  const xiaomiPatterns: [string | RegExp, string][] = [
+    [/小米\s*(?:14|13|12|11)\s*ultra/gi, '小米14 Ultra'],
+    [/小米\s*(?:14|13|12)/gi, '小米'],
+    [/redmi\s*k70/gi, 'Redmi K70'],
+    [/redmi\s*k60/gi, 'Redmi K60'],
+    [/redmi\s*note/gi, 'Redmi Note'],
+    [/小米\s*(?:空调|冰箱|洗衣机|电视)/gi, '小米家电'],
+    [/小米\s*(?:手环|充电宝|耳机)/gi, '小米配件'],
+    [/(?:xiaomi|小米|redmi|红米)/gi, '小米'],
+  ]
+  const matchedXiaomi = matchProduct(xiaomiPatterns)
+  if (matchedXiaomi) {
+    return {
+      name: matchedXiaomi,
+      brand: '小米',
+      category: '手机/数码',
+      confidence: Math.min(confidence / 100 + 0.15, 1),
+      matchedBy: '小米产品'
+    }
+  }
+
+  // ===== 5. 游戏机系列 =====
+  const gamingPatterns: [string | RegExp, string][] = [
+    [/(?:nintendo|ns|任天堂)\s*switch/gi, 'Nintendo Switch'],
+    [/switch\s*oled/gi, 'Nintendo Switch OLED'],
+    [/switch\s*(?:lite)?/gi, 'Nintendo Switch'],
+    [/ps5/gi, 'PS5'],
+    [/ps4/gi, 'PS4'],
+    [/playstation\s*5/gi, 'PS5'],
+    [/playstation\s*4/gi, 'PS4'],
+    [/xbox\s*series\s*x/gi, 'Xbox Series X'],
+    [/xbox\s*series\s*s/gi, 'Xbox Series S'],
+    [/xbox/gi, 'Xbox'],
+    [/steam\s*deck/gi, 'Steam Deck'],
+  ]
+  const matchedGaming = matchProduct(gamingPatterns)
+  if (matchedGaming) {
+    return {
+      name: matchedGaming,
+      brand: matchedGaming.includes('Nintendo') ? 'Nintendo' : matchedGaming.includes('PS') ? '索尼' : '微软',
+      category: '游戏机',
+      confidence: Math.min(confidence / 100 + 0.15, 1),
+      matchedBy: '游戏机'
+    }
+  }
+
+  // ===== 6. 戴森系列 =====
+  const dysonPatterns: [string | RegExp, string][] = [
+    [/dyson\s*airwrap/gi, '戴森Airwrap'],
+    [/戴森\s*卷发/gi, '戴森Airwrap'],
+    [/hd15|dyson\s*(?:supersonic\s*)?hd15/gi, '戴森吹风机 HD15'],
+    [/hd03|dyson\s*hd03/gi, '戴森吹风机 HD03'],
+    [/(?:dyson|戴森)\s*(?:吹风机|supersonic)/gi, '戴森吹风机'],
+    [/dyson\s*v15/gi, '戴森V15吸尘器'],
+    [/dyson\s*v12/gi, '戴森V12吸尘器'],
+    [/dyson\s*v10/gi, '戴森V10吸尘器'],
+    [/(?:dyson|戴森)\s*吸尘/gi, '戴森吸尘器'],
+    [/(?:dyson|戴森)/gi, '戴森'],
+  ]
+  const matchedDyson = matchProduct(dysonPatterns)
+  if (matchedDyson) {
+    return {
+      name: matchedDyson,
+      brand: '戴森',
+      category: matchedDyson.includes('吸尘') ? '家电' : '个护',
+      confidence: Math.min(confidence / 100 + 0.15, 1),
+      matchedBy: '戴森产品'
+    }
+  }
+
+  // ===== 7. 运动品牌 =====
+  const sportPatterns: [string | RegExp, string][] = [
+    [/aj|air\s*jordan/gi, 'Air Jordan'],
+    [/(?:nike|耐克)\s*(?:air\s*max|dunk|aj)/gi, 'Nike运动鞋'],
+    [/(?:nike|耐克)/gi, '耐克'],
+    [/adidas\s*(?:ultraboost|yeezy|originals)/gi, '阿迪达斯运动鞋'],
+    [/(?:adidas|阿迪达斯)/gi, '阿迪达斯'],
+    [/新百伦|new\s*balance(?:\s*5\d{2})?/gi, 'New Balance'],
+    [/nb\s*5\d{2}/gi, 'New Balance 5系列'],
+    [/(?:安踏|anta)/gi, '安踏'],
+    [/(?:李宁|li-ning)/gi, '李宁'],
+  ]
+  const matchedSport = matchProduct(sportPatterns)
+  if (matchedSport) {
+    return {
+      name: matchedSport,
+      brand: matchedSport.includes('耐克') ? '耐克' : matchedSport.includes('阿迪') ? '阿迪达斯' : '运动品牌',
+      category: '运动',
+      confidence: Math.min(confidence / 100 + 0.15, 1),
+      matchedBy: '运动品牌'
+    }
+  }
+
+  // ===== 8. 高端美妆 =====
+  const beautyPatterns: [string | RegExp, string][] = [
+    [/sk-?ii\s*(?:神仙水)?/gi, 'SK-II神仙水'],
+    [/(?:skii|sk-ii)/gi, 'SK-II'],
+    [/海蓝之谜|lamer/gi, '海蓝之谜'],
+    [/莱伯妮|laprairie/gi, '莱伯妮'],
+    [/希思黎|sisley/gi, '希思黎'],
+    [/兰蔻\s*(?:小黑瓶|粉水)/gi, '兰蔻'],
+    [/(?:兰蔻|lancome)/gi, '兰蔻'],
+    [/雅诗兰黛|estee\s*lauder/gi, '雅诗兰黛'],
+    [/娇韵诗|clarins/gi, '娇韵诗'],
+    [/(?:迪奥|dior)\s*(?:999|口红)/gi, '迪奥999口红'],
+    [/(?:dior|迪奥)/gi, '迪奥'],
+    [/香奈儿|chanel/gi, '香奈儿'],
+    [/ysl/gi, 'YSL'],
+    [/mac\s*(?:口红|子弹头)/gi, 'MAC口红'],
+    [/(?:mac|魅可)/gi, 'MAC'],
+    [/tf\s*(?:口红|汤姆\s*福特)/gi, 'TF口红'],
+  ]
+  const matchedBeauty = matchProduct(beautyPatterns)
+  if (matchedBeauty) {
+    return {
+      name: matchedBeauty,
+      brand: '高端美妆',
+      category: '美妆',
+      confidence: Math.min(confidence / 100 + 0.1, 1),
+      matchedBy: '美妆产品'
+    }
+  }
+
+  // ===== 9. 酒水系列 =====
+  const winePatterns: [string | RegExp, string][] = [
+    [/飞天\s*茅台/gi, '飞天茅台'],
+    [/(?:贵州\s*)?茅台/gi, '茅台'],
+    [/五粮液/gi, '五粮液'],
+    [/泸州老窖/gi, '泸州老窖'],
+    [/汾酒/gi, '汾酒'],
+    [/洋河\s*(?:梦之蓝|海之蓝)/gi, '洋河'],
+    [/国窖\s*1573/gi, '国窖1573'],
+    [/郎酒/gi, '郎酒'],
+    [/剑南春/gi, '剑南春'],
+    [/水井坊/gi, '水井坊'],
+  ]
+  const matchedWine = matchProduct(winePatterns)
+  if (matchedWine) {
+    return {
+      name: matchedWine,
+      brand: matchedWine.includes('茅台') ? '茅台' : '白酒',
+      category: '酒水',
+      confidence: Math.min(confidence / 100 + 0.1, 1),
+      matchedBy: '酒水'
+    }
+  }
+
+  // ===== 10. 母婴用品 =====
+  const babyPatterns: [string | RegExp, string][] = [
+    [/爱他美/gi, '爱他美奶粉'],
+    [/美素佳儿/gi, '美素佳儿'],
+    [/惠氏\s*(?:启赋)?/gi, '惠氏'],
+    [/雅培\s*(?:菁智)?/gi, '雅培'],
+    [/美赞臣/gi, '美赞臣'],
+    [/a2\s*(?:奶粉)?/gi, 'A2奶粉'],
+    [/花王\s*(?:纸尿裤)?/gi, '花王纸尿裤'],
+    [/好奇\s*(?:铂金)?/gi, '好奇纸尿裤'],
+    [/大王\s*(?:天使)?/gi, '大王纸尿裤'],
+    [/帮宝适/gi, '帮宝适'],
+    [/贝亲\s*(?:奶瓶)?/gi, '贝亲'],
+  ]
+  const matchedBaby = matchProduct(babyPatterns)
+  if (matchedBaby) {
+    return {
+      name: matchedBaby,
+      brand: '母婴用品',
+      category: '母婴',
+      confidence: Math.min(confidence / 100 + 0.1, 1),
+      matchedBy: '母婴用品'
+    }
+  }
+
+  // ===== 11. 食品饮料 =====
+  const foodPatterns: [string | RegExp, string][] = [
+    [/农夫山泉(?:\s*(?:4L|5L|550ml|1.5L))?/gi, '农夫山泉'],
+    [/农夫果园/gi, '农夫果园'],
+    [/可口可乐/gi, '可口可乐'],
+    [/百事可乐/gi, '百事可乐'],
+    [/元气森林/gi, '元气森林'],
+    [/娃哈哈/gi, '娃哈哈'],
+    [/怡宝/gi, '怡宝'],
+    [/康师傅(?:\s*方便面)?/gi, '康师傅'],
+    [/统一\s*方便面/gi, '统一方便面'],
+    [/今麦郎/gi, '今麦郎'],
+    [/旺旺(?:\s*(?:雪饼|仙贝|小馒头))?/gi, '旺旺'],
+    [/奥利奥/gi, '奥利奥'],
+    [/德芙/gi, '德芙巧克力'],
+    [/费列罗/gi, '费列罗'],
+    [/乐事(?:\s*薯片)?/gi, '乐事薯片'],
+    [/可比克/gi, '可比克'],
+    [/良品铺子/gi, '良品铺子'],
+    [/三只松鼠/gi, '三只松鼠'],
+    [/伊利(?:\s*(?:纯牛奶|酸奶|金典|安慕希))?/gi, '伊利'],
+    [/蒙牛(?:\s*(?:纯牛奶|酸奶|特仑苏))?/gi, '蒙牛'],
+    [/光明(?:\s*(?:纯牛奶|酸奶))?/gi, '光明'],
+  ]
+  const matchedFood = matchProduct(foodPatterns)
+  if (matchedFood) {
+    return {
+      name: matchedFood,
+      brand: matchedFood.includes('可乐') ? '可口可乐' : matchedFood.includes('伊利') ? '伊利' : matchedFood.includes('蒙牛') ? '蒙牛' : '食品',
+      category: matchedFood.includes('可乐') || matchedFood.includes('农夫') || matchedFood.includes('娃哈哈') || matchedFood.includes('元气') || matchedFood.includes('怡宝') ? '饮料' : '食品',
+      confidence: Math.min(confidence / 100 + 0.1, 1),
+      matchedBy: '食品饮料'
+    }
+  }
+
+  // ===== 12. 使用关键词匹配（兜底）=====
+  if (productKeywords.length > 0) {
+    // 识别品牌
+    let brand = ''
+    for (const [key, value] of Object.entries(brandMap)) {
+      if (cleanText.includes(key.toLowerCase()) || cleanWords.includes(key.toLowerCase())) {
+        brand = value
         break
       }
     }
+    
+    // 识别分类
+    let category = '综合'
+    for (const [cat, keywords] of Object.entries(categoryMap)) {
+      for (const kw of keywords) {
+        if (cleanText.includes(kw.toLowerCase())) {
+          category = cat
+          break
+        }
+      }
+    }
+    
+    return {
+      name: productKeywords[0],
+      brand: brand || '未知',
+      category: category,
+      confidence: Math.min(confidence / 100, 0.5), // 关键词匹配降低置信度
+      matchedBy: '关键词'
+    }
   }
 
+  // ===== 13. 最终兜底：提取数字和字母尝试识别 =====
+  const alphanumericMatch = text.match(/([a-zA-Z]{3,}\s*\d+[a-zA-Z]?|\d+[a-zA-Z]\s*[a-zA-Z]+)/i)
+  if (alphanumericMatch) {
+    return {
+      name: alphanummericMatch[1].toUpperCase(),
+      brand: '未知',
+      category: '综合',
+      confidence: 0.3,
+      matchedBy: '字母数字'
+    }
+  }
+
+  // 无法识别
   return {
-    name,
-    brand,
-    category,
-    confidence: confidence / 100
+    name: '未知商品',
+    brand: '',
+    category: '综合',
+    confidence: confidence / 100,
+    matchedBy: '未匹配'
   }
 }
