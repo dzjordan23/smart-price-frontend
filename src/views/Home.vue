@@ -1,39 +1,29 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { search } from '@/api/product'
 import { showToast } from 'vant'
 
 const router = useRouter()
 const keyword = ref('')
 const hotKeywords = ['iPhone 16', 'MacBook Air', '戴森吸尘器', '海蓝之谜', '茅台', 'Switch']
-const searchResults = ref<any[]>([])
-const searching = ref(false)
 
+// 搜索 → 直接跳转到比价页
 function goSearch() {
-  if (!keyword.value.trim()) {
+  const kw = keyword.value.trim()
+  if (!kw) {
     showToast('请输入商品名称')
     return
   }
-  // 直接在当前页面搜索，而不是跳转
-  handleHotSearch(keyword.value)
+  router.push({ name: 'Compare', query: { keyword: kw } })
 }
 
 function goRecognize() {
   router.push('/recognize')
 }
 
-async function handleHotSearch(kw: string) {
+function handleHotSearch(kw: string) {
   keyword.value = kw
-  searching.value = true
-  try {
-    const res: any = await search(kw)
-    searchResults.value = res?.items || res?.list || res || []
-  } catch {
-    searchResults.value = []
-  } finally {
-    searching.value = false
-  }
+  router.push({ name: 'Compare', query: { keyword: kw } })
 }
 </script>
 
@@ -48,7 +38,7 @@ async function handleHotSearch(kw: string) {
       <div class="search-bar card glow-border">
         <van-search
           v-model="keyword"
-          placeholder="搜索商品名称或拍一拍"
+          placeholder="搜索商品名称，如：iPhone 16"
           shape="round"
           :show-action="true"
           @search="goSearch"
@@ -58,7 +48,14 @@ async function handleHotSearch(kw: string) {
             <van-icon name="photograph" size="20" color="var(--color-primary)" />
           </template>
           <template #action>
-            <van-button type="primary" size="small" @click="goSearch">搜索</van-button>
+            <van-button
+              type="primary"
+              size="small"
+              style="padding: 0 16px; font-size: 14px;"
+              @click="goSearch"
+            >
+              搜索
+            </van-button>
           </template>
         </van-search>
       </div>
@@ -104,22 +101,6 @@ async function handleHotSearch(kw: string) {
         </van-tag>
       </div>
     </div>
-
-    <!-- 搜索结果 -->
-    <div v-if="searchResults.length > 0" class="section">
-      <h3 class="section-title"><span class="dot"></span>搜索结果</h3>
-      <div
-        v-for="item in searchResults"
-        :key="item.id"
-        class="card result-item"
-        @click="$router.push(`/product/${item.id}`)"
-      >
-        <div class="result-name">{{ item.name }}</div>
-        <div class="result-price">¥{{ item.minPrice || '--' }}</div>
-      </div>
-    </div>
-
-    <van-loading v-if="searching" class="center-loading" />
   </div>
 </template>
 
@@ -168,6 +149,9 @@ async function handleHotSearch(kw: string) {
     border: 1px solid var(--border-color);
     border-radius: 24px;
     padding-left: 4px;
+  }
+  :deep(.van-search__action) {
+    padding: 0 8px 0 4px;
   }
 }
 
@@ -246,29 +230,5 @@ async function handleHotSearch(kw: string) {
       color: var(--bg-primary);
     }
   }
-}
-
-.result-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.result-name {
-  font-size: $font-md;
-  flex: 1;
-  margin-right: $spacing-md;
-}
-
-.result-price {
-  font-size: $font-lg;
-  font-weight: 700;
-  color: var(--color-up);
-}
-
-.center-loading {
-  display: flex;
-  justify-content: center;
-  padding: $spacing-xl;
 }
 </style>

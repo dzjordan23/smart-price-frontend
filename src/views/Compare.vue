@@ -21,7 +21,7 @@ const mockResult = {
   status: 'completed',
   product: {
     id: Number(route.query.productId) || 1,
-    name: route.query.keyword || 'iPhone 16 Pro Max 256GB',
+    name: String(route.query.keyword || 'iPhone 16 Pro Max 256GB'),
     image: '',
   },
   prices: [
@@ -32,37 +32,36 @@ const mockResult = {
 }
 
 onMounted(async () => {
-  // 优先使用 taskId 查询比价结果（异步任务轮询模式）
   const taskIdParam = route.query.taskId
   const productIdParam = route.query.productId
   const keywordParam = route.query.keyword
 
   try {
     if (taskIdParam) {
-      // 模式1: 使用 taskId 轮询比价结果
       taskId.value = String(taskIdParam)
       await pollCompareResult(taskId.value)
     } else if (productIdParam) {
-      // 模式2: 使用 productId 查询已有比价结果
       const data: any = await getCompareResult(String(productIdParam))
       if (data?.status === 'processing') {
-        // 任务处理中，轮询
         taskId.value = data.taskId || String(productIdParam)
         await pollCompareResult(taskId.value)
       } else if (data?.status === 'done') {
-        // 任务完成，直接显示结果
-        result.value = data
+        result.value = transformBackendResult(data)
+      } else {
+        // 直接用数据
+        result.value = transformBackendResult(data)
       }
     } else if (keywordParam) {
-      // 模式3: 新建比价任务（关键词模式）
       await startNewCompareTask(String(keywordParam))
     } else {
-      // 无参数，使用 mock 数据
       result.value = mockResult
     }
   } catch (err: any) {
-    console.warn('API 调用失败，使用 mock 数据:', err.message)
-    result.value = mockResult
+    console.warn('API 调用失败:', err.message)
+    // API 不通时显示 mock 数据，但 product.name 使用搜索关键词
+    const m = { ...mockResult }
+    m.product = { ...m.product, name: String(keywordParam || 'iPhone 16 Pro Max 256GB') }
+    result.value = m
   }
   loading.value = false
 })
