@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showToast, showLoadingToast, closeToast } from 'vant'
+import { showToast, showLoadingToast, closeToast, showDialog } from 'vant'
 import { extractTextFromImage, generateProductNameFromOcr } from '@/api/ocr'
-import { fetchRecognize, fetchCompareResult } from '@/api/crawler'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,22 +14,33 @@ const ocrProgress = ref(0)
 const ocrStatus = ref('')
 const recognizeResult = ref<any>(null)
 const rawOcrText = ref('')
-const showDebug = ref(false) // 显示调试信息
 
-// 拍照/选择图片（H5 用 input 模拟）
+// 检查是否可以从 URL 参数直接识别
+onMounted(() => {
+  if (route.query.keyword) {
+    keyword.value = route.query.keyword as string
+    // 如果有关键词参数，自动识别
+    setTimeout(() => handleRecognize(), 100)
+  }
+})
+
+// 拍照/选择图片
 function handleChooseImage() {
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = 'image/*'
-  input.capture = 'environment' // 优先使用后置摄像头
+  input.capture = 'environment'
   input.onchange = (e: any) => {
     const file = e.target.files[0]
     if (file) {
       const reader = new FileReader()
       reader.onload = (ev) => {
         imageUrl.value = ev.target?.result as string
-        // 选择图片后自动开始识别
+        console.log('📷 图片已选择，开始识别...')
         setTimeout(() => handleRecognize(), 300)
+      }
+      reader.onerror = () => {
+        showToast('图片加载失败，请重试')
       }
       reader.readAsDataURL(file)
     }
@@ -38,9 +48,24 @@ function handleChooseImage() {
   input.click()
 }
 
+// 更新进度显示
+function updateProgress(progress: { status: string; progress: number }) {
+  ocrProgress.value = Math.round(progress.progress * 100)
+  ocrStatus.value = progress.status
+}
+
 // 识别商品
 async function handleRecognize() {
-  // 检查是否有输入
+  // 如果有关键词且无图片，直接用关键词搜索
+  if (keyword.value.trim() && !imageUrl.value) {
+    router.push({
+      name: 'Compare',
+      query: { keyword: keyword.value.trim() }
+    })
+    return
+  }
+
+  // 如果既没有图片也没有关键词
   if (!keyword.value.trim() && !imageUrl.value) {
     showToast('请输入商品名称或拍照')
     return
@@ -50,121 +75,87 @@ async function handleRecognize() {
   ocrProgress.value = 0
   ocrStatus.value = '准备识别...'
 
+  const loadingToast = showLoadingToast({
+    message: '正在识别...',
+    forbidClick: true,
+    loadingType: 'spinner',
+    duration: 0
+  })
+
   try {
     let productName = keyword.value.trim()
+    let useBackendFallback = false
 
-    // 如果有图片，先进行 OCR 识别
+    // 如果有图片，进行 OCR 识别
     if (imageUrl.value) {
-      const loadingToast = showLoadingToast({
-        message: '正在识别图片...',
-        forbidClick: true,
-        loadingType: 'spinner',
-        duration: 0
-      })
-
+      console.log('🔍 开始 OCR 识别...')
+      
       try {
-        // 调用 OCR 识别图片中的文字
-        const ocrResult = await extractTextFromImage(imageUrl.value, (progress) => {
-          ocrProgress.value = Math.round(progress.progress * 100)
-          ocrStatus.value = progress.status === 'recognizing text'
-            ? '识别文字中...'
-            : progress.status === 'loading tesseract core'
-            ? '加载识别引擎...'
-            : progress.status === 'initializing tesseract'
-            ? '初始化模型...'
-            : progress.status === 'loading language traineddata'
-            ? '加载语言包...'
-            : '处理中...'
-        })
-
+        const ocrResult = await extractTextFromImage(imageUrl.value, updateProgress)
+        
         rawOcrText.value = ocrResult.text
-        console.log('🔍 OCR 原始识别结果:', ocrResult)
-        console.log('📝 识别的文字:', ocrResult.text)
-        console.log('🎯 提取的关键词:', ocrResult.productKeywords)
-        console.log('📊 OCR 置信度:', ocrResult.confidence)
+        console.log('📝 OCR 识别结果:', ocrResult)
+        console.log('🎯 识别的文字:', ocrResult.text)
+        console.log('🏷️ 提取的关键词:', ocrResult.productKeywords)
+        console.log('📊 识别来源:', ocrResult.source)
 
-        // 根据 OCR 结果生成商品名称
+        // 解析商品信息
         const generated = generateProductNameFromOcr(ocrResult)
         console.log('🤖 AI 解析结果:', generated)
 
-        // 如果有识别结果且置信度足够，使用识别结果
+        // 如果识别成功
         if (generated.name !== '未知商品' && generated.confidence > 0.3) {
           productName = generated.name
           recognizeResult.value = {
             name: generated.name,
             brand: generated.brand,
             category: generated.category,
-            spec: '',
             confidence: generated.confidence,
             rawText: ocrResult.text,
             productKeywords: ocrResult.productKeywords,
             matchedBy: generated.matchedBy,
-            ocrConfidence: ocrResult.confidence
+            ocrConfidence: ocrResult.confidence,
+            source: ocrResult.source
           }
-        } else {
-          // OCR 识别效果不好，尝试使用后端 API
-          console.log('🔄 OCR 识别置信度不足，尝试后端 API...')
           
-          // 如果有提取的关键词，尝试用关键词搜索
-          if (ocrResult.productKeywords.length > 0) {
-            try {
-              const backendResult = await fetchRecognize(ocrResult.productKeywords[0])
-              if (backendResult?.recognized?.name && backendResult.recognized.name !== '未知商品') {
-                showToast({ message: '通过后端识别成功', type: 'success' })
-                recognizeResult.value = {
-                  ...backendResult.recognized,
-                  rawText: ocrResult.text,
-                  productKeywords: ocrResult.productKeywords,
-                  matchedBy: '后端API'
-                }
-                productName = backendResult.recognized.name
-              } else {
-                throw new Error('后端也未能识别')
-              }
-            } catch (backendError) {
-              console.log('后端识别也失败，显示原始结果让用户确认')
-              showWarningResult(ocrResult, generated)
-            }
-          } else {
-            showWarningResult(ocrResult, generated)
-          }
+          // 延迟跳转到比价页面
+          showToast({ message: `识别成功：${generated.name}`, type: 'success' })
+          setTimeout(() => {
+            router.push({
+              name: 'Compare',
+              query: { keyword: productName }
+            })
+          }, 1000)
+        } else {
+          // 识别置信度不够
+          useBackendFallback = true
         }
       } catch (ocrError: any) {
-        console.error('❌ OCR 失败:', ocrError)
-        // OCR 失败时，如果有关键词则使用关键词识别
-        if (keyword.value.trim()) {
-          const result = await fetchRecognize(keyword.value)
-          recognizeResult.value = result.recognized || result
-          productName = keyword.value
-        } else {
-          showToast({ message: '图片识别失败，请手动输入商品名称', type: 'fail' })
-          recognizeResult.value = {
-            name: '识别失败',
-            brand: '',
-            category: '综合',
-            spec: '',
-            confidence: 0,
-            error: ocrError.message
-          }
-        }
-      } finally {
-        closeToast()
+        console.error('OCR 识别失败:', ocrError)
+        useBackendFallback = true
       }
-    } else if (keyword.value.trim()) {
-      // 只有关键词，没有图片
-      const result = await fetchRecognize(keyword.value)
-      recognizeResult.value = result.recognized || result
     }
 
-    // 如果识别成功，自动跳转到比价
-    if (recognizeResult.value?.name && recognizeResult.value.name !== '识别失败' && recognizeResult.value.name !== '未能识别' && recognizeResult.value.name !== '未知商品') {
-      showToast({ message: `识别成功：${recognizeResult.value.name}`, type: 'success' })
+    // 如果 OCR 失败或置信度不够，使用输入的关键词
+    if (useBackendFallback && keyword.value.trim()) {
+      console.log('🔄 使用输入的关键词:', keyword.value)
+      showToast({ message: '使用您输入的关键词搜索', type: 'info' })
       setTimeout(() => {
         router.push({
           name: 'Compare',
-          query: { keyword: recognizeResult.value.name }
+          query: { keyword: keyword.value.trim() }
         })
-      }, 800)
+      }, 500)
+    } else if (!recognizeResult.value) {
+      // 完全无法识别
+      showToast({ message: '未能识别商品，请输入商品名称', type: 'warning' })
+      recognizeResult.value = {
+        name: '未能识别',
+        brand: '',
+        category: '综合',
+        confidence: 0.1,
+        suggestion: '请输入商品名称后点击搜索'
+      }
     }
   } catch (error: any) {
     console.error('识别失败:', error)
@@ -173,23 +164,7 @@ async function handleRecognize() {
     recognizing.value = false
     ocrProgress.value = 0
     ocrStatus.value = ''
-  }
-}
-
-// 显示警告结果（OCR 未能准确识别）
-function showWarningResult(ocrResult: any, generated: any) {
-  showToast({ message: '未能准确识别，请确认商品名称', type: 'warning' })
-  recognizeResult.value = {
-    name: generated.name,
-    brand: generated.brand,
-    category: generated.category,
-    spec: '',
-    confidence: generated.confidence,
-    rawText: ocrResult.text,
-    productKeywords: ocrResult.productKeywords,
-    matchedBy: generated.matchedBy,
-    ocrConfidence: ocrResult.confidence,
-    suggestion: '请确认商品名称是否正确，或尝试手动输入'
+    closeToast()
   }
 }
 
@@ -206,11 +181,27 @@ function confirmProduct() {
   })
 }
 
+// 手动开始比价
+function startCompare() {
+  if (!recognizeResult.value?.name || recognizeResult.value.name === '识别失败' || recognizeResult.value.name === '未能识别') {
+    showToast('请先识别商品或手动输入商品名称')
+    return
+  }
+
+  router.push({
+    name: 'Compare',
+    query: { keyword: recognizeResult.value.name }
+  })
+}
+
 // 热门商品快捷识别
 function quickRecognize(item: string) {
   keyword.value = item
   imageUrl.value = ''
-  handleRecognize()
+  router.push({
+    name: 'Compare',
+    query: { keyword: item }
+  })
 }
 </script>
 

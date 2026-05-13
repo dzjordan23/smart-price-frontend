@@ -1,17 +1,31 @@
 /**
- * 前端 OCR 服务 - 使用 Tesseract.js 进行图片文字识别
- * 支持中英文混合识别
+ * 前端 OCR 服务 - 支持多种识别方式
+ * 1. 后端 API（优先）- 使用腾讯云 OCR
+ * 2. 前端 Tesseract.js（备用）- 离线可用
  */
 
-// 动态导入 Tesseract.js 以减小初始加载体积
+// 动态导入 Tesseract.js
 let Tesseract: any = null
+let tesseractLoading = false
 
 async function getTesseract() {
-  if (!Tesseract) {
+  if (Tesseract) return Tesseract
+  if (tesseractLoading) {
+    // 等待加载完成
+    while (tesseractLoading) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    return Tesseract
+  }
+  
+  tesseractLoading = true
+  try {
     const module = await import('tesseract.js')
     Tesseract = module.default || module
+    return Tesseract
+  } finally {
+    tesseractLoading = false
   }
-  return Tesseract
 }
 
 // OCR 进度回调类型
@@ -24,38 +38,118 @@ type ProgressCallback = (progress: {
 interface OcrResult {
   text: string           // 识别的完整文本
   confidence: number      // 置信度 0-100
-  words: string[]         // 识别出的单词/词组
+  words: string[]        // 识别出的单词/词组
   productKeywords: string[] // 提取的商品关键词
+  source: 'backend' | 'tesseract'  // 识别来源
 }
 
 /**
- * 从图片中提取文字
+ * 带超时的 Promise
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMsg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+    )
+  ])
+}
+
+/**
+ * 从后端 API 识别图片（优先）
+ */
+async function recognizeByBackend(imageBase64: string): Promise<OcrResult> {
+  try {
+    const response = await fetch('/api/ocr/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageBase64 })
+    })
+    
+    if (!response.ok) throw new Error('后端 OCR 失败')
+    
+    const data = await response.json()
+    return {
+      text: data.text || '',
+      confidence: data.confidence || 50,
+      words: data.words || [],
+      productKeywords: extractProductKeywords(data.text || '', data.words || []),
+      source: 'backend'
+    }
+  } catch (error) {
+    console.error('后端 OCR 失败:', error)
+    throw error
+  }
+}
+
+/**
+ * 从图片中提取文字（混合策略）
  */
 export async function extractTextFromImage(
   imageUrl: string,
   onProgress?: ProgressCallback
 ): Promise<OcrResult> {
+  // 如果是 data URL，转换为 base64
+  let base64 = imageUrl
+  if (imageUrl.startsWith('data:')) {
+    base64 = imageUrl
+  }
+  
+  // 1. 优先尝试后端 API（更准确、更快）
+  onProgress?.({ status: '正在调用后端识别...', progress: 0.1 })
+  
   try {
-    const OCR = await getTesseract()
+    const result = await withTimeout(
+      recognizeByBackend(base64),
+      15000, // 15秒超时
+      '后端识别超时'
+    )
+    return result
+  } catch (backendError) {
+    console.warn('后端识别失败，尝试前端识别:', backendError)
+  }
+  
+  // 2. 后端失败，使用前端 Tesseract.js
+  onProgress?.({ status: '后端不可用，正在加载本地识别引擎...', progress: 0.2 })
+  
+  try {
+    const OCR = await withTimeout(
+      getTesseract(),
+      20000, // 20秒加载超时
+      '识别引擎加载超时'
+    )
     
-    const result = await OCR.recognize(
-      imageUrl,
-      'chi_sim+eng', // 简体中文 + 英文
-      {
-        logger: (m: any) => {
-          if (onProgress && m.status) {
-            onProgress({
-              status: m.status,
-              progress: m.progress || 0
-            })
+    onProgress?.({ status: '正在识别文字...', progress: 0.3 })
+    
+    const result = await withTimeout(
+      OCR.recognize(
+        imageUrl,
+        'chi_sim+eng', // 简体中文 + 英文
+        {
+          logger: (m: any) => {
+            if (m.status) {
+              const progressMap: Record<string, number> = {
+                'loading tesseract core': 0.3,
+                'initializing tesseract': 0.4,
+                'loading language traineddata': 0.5,
+                'initializing api': 0.6,
+                'recognizing text': 0.7,
+              }
+              onProgress?.({
+                status: m.status,
+                progress: progressMap[m.status] || m.progress * 0.4 + 0.3
+              })
+            }
           }
         }
-      }
+      ),
+      60000, // 60秒识别超时
+      '文字识别超时'
     )
-
+    
     const text = result.data.text.trim()
-    const confidence = result.data.confidence
-
+    const confidence = result.data.confidence || 0
+    
     // 提取所有识别的词
     const words: string[] = []
     if (result.data.words) {
@@ -65,29 +159,32 @@ export async function extractTextFromImage(
         }
       }
     }
-
+    
     // 从识别的文本中提取商品关键词
     const productKeywords = extractProductKeywords(text, words)
-
+    
     return {
       text,
       confidence,
       words,
-      productKeywords
+      productKeywords,
+      source: 'tesseract'
     }
-  } catch (error) {
-    console.error('OCR 识别失败:', error)
-    throw new Error('图片识别失败，请重试')
+  } catch (error: any) {
+    console.error('前端 OCR 失败:', error)
+    
+    // 所有方式都失败
+    throw new Error('图片识别失败: ' + (error.message || '未知错误'))
   }
 }
 
-// =============== 商品数据库 - 支持更多常见商品 ===============
+// =============== 商品数据库 ===============
 interface ProductPattern {
-  patterns: RegExp[]           // 匹配模式（正则）
-  name: string                 // 标准商品名称
-  brand: string                // 品牌
-  category: string             // 分类
-  aliases?: string[]           // 别名/常见称呼
+  patterns: RegExp[]
+  name: string
+  brand: string
+  category: string
+  aliases?: string[]
 }
 
 const PRODUCT_DATABASE: ProductPattern[] = [
@@ -160,7 +257,7 @@ const PRODUCT_DATABASE: ProductPattern[] = [
   
   // ===== 三星 =====
   {
-    patterns: [/galaxy\s*(?:s\d+|z\s*(?:fold|flip))/gi, /三星/gi, /samsumg|samsung/gi],
+    patterns: [/galaxy\s*(?:s\d+|z\s*(?:fold|flip))/gi, /三星/gi, /samsung/gi],
     name: '三星',
     brand: '三星',
     category: '手机'
@@ -183,7 +280,7 @@ const PRODUCT_DATABASE: ProductPattern[] = [
     aliases: ['dyson吹风机']
   },
   {
-    patterns: [/戴森\s*吸尘器/gi, /dyson\s*v(10|12|15|8)/gi, /dyson\s*vacuum/gi],
+    patterns: [/戴森\s*吸尘器/gi, /dyson\s*v(10|12|15|8)/gi],
     name: '戴森吸尘器',
     brand: '戴森',
     category: '家电'
@@ -319,12 +416,6 @@ const PRODUCT_DATABASE: ProductPattern[] = [
     category: '美妆'
   },
   {
-    patterns: [/兰蔻\s*(?:小黑瓶|粉水)/gi],
-    name: '兰蔻粉水',
-    brand: '兰蔻',
-    category: '美妆'
-  },
-  {
     patterns: [/海蓝之谜|lamer/gi],
     name: '海蓝之谜',
     brand: '海蓝之谜',
@@ -362,18 +453,6 @@ const PRODUCT_DATABASE: ProductPattern[] = [
     brand: '飞利浦',
     category: '个护'
   },
-  {
-    patterns: [/飞利浦\s*(?:电动牙刷|剃须刀)/gi, /oral-?b/gi],
-    name: '电动牙刷',
-    brand: '飞利浦',
-    category: '个护'
-  },
-  {
-    patterns: [/戴森\s*(?:吹风机|卷发)/gi, /dyson/gi],
-    name: '戴森吹风机',
-    brand: '戴森',
-    category: '个护'
-  },
   
   // ===== 母婴 =====
   {
@@ -389,32 +468,6 @@ const PRODUCT_DATABASE: ProductPattern[] = [
     category: '母婴'
   },
   
-  // ===== 数码配件 =====
-  {
-    patterns: [/小米\s*(?:充电宝|移动电源|手环|耳机)/gi],
-    name: '小米配件',
-    brand: '小米',
-    category: '配件'
-  },
-  {
-    patterns: [/airpods?(?:\s*pro)?/gi, /airpod/gi],
-    name: 'AirPods',
-    brand: 'Apple',
-    category: '耳机'
-  },
-  {
-    patterns: [/索尼\s*(?:耳机|降噪豆)/gi, /sony\s*wh/gi],
-    name: '索尼耳机',
-    brand: '索尼',
-    category: '耳机'
-  },
-  {
-    patterns: [/beats/gi],
-    name: 'Beats耳机',
-    brand: 'Beats',
-    category: '耳机'
-  },
-  
   // ===== 茶叶/保健品 =====
   {
     patterns: [/小罐茶|竹叶青|龙井|碧螺春|铁观音/gi],
@@ -427,39 +480,27 @@ const PRODUCT_DATABASE: ProductPattern[] = [
     name: '燕窝',
     brand: '燕窝',
     category: '保健品'
-  },
-  {
-    patterns: [/冬虫夏草|人参|鹿茸/gi],
-    name: '滋补品',
-    brand: '滋补品',
-    category: '保健品'
   }
 ]
 
 /**
- * 从文本中提取商品关键词（增强版）
+ * 从文本中提取商品关键词
  */
 function extractProductKeywords(text: string, words: string[] = []): string[] {
   const keywords: string[] = []
   const lowerText = text.toLowerCase()
+  const combinedWords = (words || []).join('').toLowerCase()
   
-  // 合并 words 数组形成连续文本，便于短语匹配
-  const combinedWords = words.join('')
-  const combinedLower = combinedWords.toLowerCase()
-  
-  // 1. 使用商品数据库精确匹配
+  // 1. 使用商品数据库匹配
   for (const product of PRODUCT_DATABASE) {
     for (const pattern of product.patterns) {
-      // 尝试在原始文本中匹配
       if (pattern.test(text)) {
         keywords.push(product.name)
-        // 添加别名
         if (product.aliases) {
           keywords.push(...product.aliases)
         }
         break
       }
-      // 尝试在 words 组合文本中匹配（处理 OCR 断字问题）
       if (pattern.test(combinedWords)) {
         keywords.push(product.name)
         break
@@ -467,19 +508,18 @@ function extractProductKeywords(text: string, words: string[] = []): string[] {
     }
   }
   
-  // 2. 数字+品牌组合匹配（处理 "16 Pro" 这样的 OCR 结果）
+  // 2. 数字+品牌组合匹配
   const numberPattern = /(\d+)\s*(?:pro|max|plus)?/gi
   const numbers = text.match(numberPattern) || []
   for (const num of numbers) {
     if (parseInt(num) >= 10 && parseInt(num) <= 20) {
-      // 可能是 iPhone 型号
-      if (lowerText.includes('iphone') || combinedLower.includes('iphone')) {
+      if (lowerText.includes('iphone') || combinedWords.includes('iphone')) {
         keywords.push(`iPhone ${num}`)
       }
     }
   }
   
-  // 3. 价格信息（帮助确认商品类别）
+  // 3. 价格信息
   const priceMatch = text.match(/[¥￥$]?\s*(\d+(?:\.\d{2})?)/)
   if (priceMatch) {
     const price = parseFloat(priceMatch[1])
@@ -487,14 +527,11 @@ function extractProductKeywords(text: string, words: string[] = []): string[] {
     else if (price >= 1000) keywords.push('中端商品')
   }
   
-  // 4. 去除 OCR 空格干扰（如 "i P h o n e"）
-  const cleanText = text.replace(/\s+/g, '')
-  const cleanLower = cleanText.toLowerCase()
-  
-  // 检查去空格后的文本
+  // 4. 去除空格干扰
+  const cleanText = text.replace(/\s+/g, '').toLowerCase()
   const commonBrands = ['iphone', 'ipad', 'macbook', 'airpods', 'switch', 'ps5', 'dyson', 'nike', 'adidas']
   for (const brand of commonBrands) {
-    if (cleanLower.includes(brand) && !keywords.some(k => k.toLowerCase().includes(brand))) {
+    if (cleanText.includes(brand) && !keywords.some(k => k.toLowerCase().includes(brand))) {
       keywords.push(brand)
     }
   }
@@ -503,57 +540,41 @@ function extractProductKeywords(text: string, words: string[] = []): string[] {
 }
 
 /**
- * 根据 OCR 结果生成标准商品名称（增强版智能匹配）
+ * 根据 OCR 结果生成标准商品名称
  */
 export function generateProductNameFromOcr(ocrResult: OcrResult): {
   name: string
   brand: string
   category: string
   confidence: number
-  matchedBy: string  // 新增：匹配方式
+  matchedBy: string
 } {
   const { text, productKeywords, confidence, words } = ocrResult
 
-  // 清理 OCR 文本（去除空格干扰）
   const cleanText = text.replace(/\s+/g, '').toLowerCase()
   const cleanWords = (words || []).map(w => w.replace(/\s+/g, '').toLowerCase()).join('')
   
-  // 品牌映射
   const brandMap: Record<string, string> = {
     'iphone': 'Apple', 'ipad': 'Apple', 'macbook': 'Apple', 'airpods': 'Apple',
     'huawei': '华为', '华为': '华为', 'mate': '华为', 'pura': '华为',
-    'xiaomi': '小米', '小米': '小米', 'redmi': '小米', '红米': '小米',
+    'xiaomi': '小米', '小米': '小米', 'redmi': '小米',
     '三星': '三星', 'samsung': '三星',
-    'oppo': 'OPPO', 'vivo': 'vivo', '荣耀': '荣耀', 'honor': '荣耀',
+    'oppo': 'OPPO', 'vivo': 'vivo', '荣耀': '荣耀',
     '戴森': '戴森', 'dyson': '戴森',
     '耐克': '耐克', 'nike': '耐克',
     '阿迪达斯': '阿迪达斯', 'adidas': '阿迪达斯',
-    'switch': 'Nintendo', 'ps5': '索尼', 'playstation': '索尼', 'xbox': '微软',
+    'switch': 'Nintendo', 'ps5': '索尼',
     '茅台': '茅台', '五粮液': '五粮液',
   }
 
-  // 分类映射
-  const categoryMap: Record<string, string> = {
-    'Apple': '手机/电脑', '华为': '手机', '小米': '手机/数码',
-    '戴森': '家电', 'Nintendo': '游戏机', '索尼': '游戏机',
-    '耐克': '运动', '阿迪达斯': '运动'
-  }
-
-  // ===== 智能匹配函数 =====
   const matchProduct = (patterns: [string | RegExp, string][]): string | null => {
     for (const [pattern, name] of patterns) {
       if (typeof pattern === 'string') {
         const p = pattern.toLowerCase()
-        // 原始文本匹配
         if (cleanText.includes(p) || cleanWords.includes(p)) {
           return name
         }
-        // 带空格的 OCR 文本匹配
-        if (text.toLowerCase().includes(p.replace(/\s+/g, ' '))) {
-          return name
-        }
       } else {
-        // 正则匹配
         if (pattern.test(text) || pattern.test(cleanText) || pattern.test(cleanWords)) {
           return name
         }
@@ -562,7 +583,7 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     return null
   }
 
-  // ===== 1. 精确匹配 iPhone 系列（最常见）=====
+  // iPhone 系列
   const iphonePatterns: [string | RegExp, string][] = [
     [/iphone\s*16\s*pro\s*max/gi, 'iPhone 16 Pro Max'],
     [/iphone\s*16\s*pro/gi, 'iPhone 16 Pro'],
@@ -575,8 +596,7 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     [/iphone\s*14/gi, 'iPhone 14'],
     [/iphone\s*13/gi, 'iPhone 13'],
     [/iphone\s*12/gi, 'iPhone 12'],
-    // 处理 OCR 空格问题
-    [/iphone16promax|iphone\s*16\s*pro\s*max/gi, 'iPhone 16 Pro Max'],
+    [/iphone16promax/gi, 'iPhone 16 Pro Max'],
     [/iphone16pro/gi, 'iPhone 16 Pro'],
     [/iphone16/gi, 'iPhone 16'],
   ]
@@ -586,12 +606,12 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
       name: matchedIphone,
       brand: 'Apple',
       category: '手机',
-      confidence: Math.min(confidence / 100 + 0.2, 1), // 增加置信度
+      confidence: Math.min(confidence / 100 + 0.2, 1),
       matchedBy: '精确匹配'
     }
   }
 
-  // ===== 2. Apple 产品系列 =====
+  // Apple 产品
   const applePatterns: [string | RegExp, string][] = [
     [/macbook\s*air/gi, 'MacBook Air'],
     [/macbook\s*pro/gi, 'MacBook Pro'],
@@ -601,9 +621,8 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     [/ipad\s*mini/gi, 'iPad mini'],
     [/ipad/gi, 'iPad'],
     [/airpods\s*pro/gi, 'AirPods Pro'],
-    [/airpods(?:\s*2|\s*3)?/gi, 'AirPods'],
+    [/airpods/gi, 'AirPods'],
     [/apple\s*watch/gi, 'Apple Watch'],
-    [/(?:imac|mac\s*mini|mac\s*studio)/gi, 'iMac'],
   ]
   const matchedApple = matchProduct(applePatterns)
   if (matchedApple) {
@@ -616,7 +635,7 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 3. 华为系列 =====
+  // 华为
   const huaweiPatterns: [string | RegExp, string][] = [
     [/mate\s*60\s*pro/gi, '华为Mate60 Pro'],
     [/mate\s*60/gi, '华为Mate60'],
@@ -638,15 +657,12 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 4. 小米系列 =====
+  // 小米
   const xiaomiPatterns: [string | RegExp, string][] = [
-    [/小米\s*(?:14|13|12|11)\s*ultra/gi, '小米14 Ultra'],
+    [/小米\s*(?:14|13|12)\s*ultra/gi, '小米14 Ultra'],
     [/小米\s*(?:14|13|12)/gi, '小米'],
     [/redmi\s*k70/gi, 'Redmi K70'],
-    [/redmi\s*k60/gi, 'Redmi K60'],
     [/redmi\s*note/gi, 'Redmi Note'],
-    [/小米\s*(?:空调|冰箱|洗衣机|电视)/gi, '小米家电'],
-    [/小米\s*(?:手环|充电宝|耳机)/gi, '小米配件'],
     [/(?:xiaomi|小米|redmi|红米)/gi, '小米'],
   ]
   const matchedXiaomi = matchProduct(xiaomiPatterns)
@@ -660,19 +676,17 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 5. 游戏机系列 =====
+  // 游戏机
   const gamingPatterns: [string | RegExp, string][] = [
     [/(?:nintendo|ns|任天堂)\s*switch/gi, 'Nintendo Switch'],
     [/switch\s*oled/gi, 'Nintendo Switch OLED'],
-    [/switch\s*(?:lite)?/gi, 'Nintendo Switch'],
+    [/switch/gi, 'Nintendo Switch'],
     [/ps5/gi, 'PS5'],
     [/ps4/gi, 'PS4'],
-    [/playstation\s*5/gi, 'PS5'],
-    [/playstation\s*4/gi, 'PS4'],
+    [/playstation/gi, 'PlayStation'],
     [/xbox\s*series\s*x/gi, 'Xbox Series X'],
     [/xbox\s*series\s*s/gi, 'Xbox Series S'],
     [/xbox/gi, 'Xbox'],
-    [/steam\s*deck/gi, 'Steam Deck'],
   ]
   const matchedGaming = matchProduct(gamingPatterns)
   if (matchedGaming) {
@@ -685,12 +699,12 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 6. 戴森系列 =====
+  // 戴森
   const dysonPatterns: [string | RegExp, string][] = [
     [/dyson\s*airwrap/gi, '戴森Airwrap'],
     [/戴森\s*卷发/gi, '戴森Airwrap'],
-    [/hd15|dyson\s*(?:supersonic\s*)?hd15/gi, '戴森吹风机 HD15'],
-    [/hd03|dyson\s*hd03/gi, '戴森吹风机 HD03'],
+    [/hd15|dyson\s*(?:supersonic)?hd15/gi, '戴森吹风机 HD15'],
+    [/hd03/gi, '戴森吹风机 HD03'],
     [/(?:dyson|戴森)\s*(?:吹风机|supersonic)/gi, '戴森吹风机'],
     [/dyson\s*v15/gi, '戴森V15吸尘器'],
     [/dyson\s*v12/gi, '戴森V12吸尘器'],
@@ -709,15 +723,12 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 7. 运动品牌 =====
+  // 运动
   const sportPatterns: [string | RegExp, string][] = [
     [/aj|air\s*jordan/gi, 'Air Jordan'],
-    [/(?:nike|耐克)\s*(?:air\s*max|dunk|aj)/gi, 'Nike运动鞋'],
     [/(?:nike|耐克)/gi, '耐克'],
-    [/adidas\s*(?:ultraboost|yeezy|originals)/gi, '阿迪达斯运动鞋'],
     [/(?:adidas|阿迪达斯)/gi, '阿迪达斯'],
-    [/新百伦|new\s*balance(?:\s*5\d{2})?/gi, 'New Balance'],
-    [/nb\s*5\d{2}/gi, 'New Balance 5系列'],
+    [/新百伦|new\s*balance/gi, 'New Balance'],
     [/(?:安踏|anta)/gi, '安踏'],
     [/(?:李宁|li-ning)/gi, '李宁'],
   ]
@@ -732,24 +743,16 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 8. 高端美妆 =====
+  // 美妆
   const beautyPatterns: [string | RegExp, string][] = [
-    [/sk-?ii\s*(?:神仙水)?/gi, 'SK-II神仙水'],
-    [/(?:skii|sk-ii)/gi, 'SK-II'],
+    [/sk-?ii|skii/gi, 'SK-II'],
     [/海蓝之谜|lamer/gi, '海蓝之谜'],
-    [/莱伯妮|laprairie/gi, '莱伯妮'],
-    [/希思黎|sisley/gi, '希思黎'],
-    [/兰蔻\s*(?:小黑瓶|粉水)/gi, '兰蔻'],
     [/(?:兰蔻|lancome)/gi, '兰蔻'],
     [/雅诗兰黛|estee\s*lauder/gi, '雅诗兰黛'],
-    [/娇韵诗|clarins/gi, '娇韵诗'],
-    [/(?:迪奥|dior)\s*(?:999|口红)/gi, '迪奥999口红'],
-    [/(?:dior|迪奥)/gi, '迪奥'],
+    [/(?:迪奥|dior)/gi, '迪奥'],
     [/香奈儿|chanel/gi, '香奈儿'],
     [/ysl/gi, 'YSL'],
-    [/mac\s*(?:口红|子弹头)/gi, 'MAC口红'],
     [/(?:mac|魅可)/gi, 'MAC'],
-    [/tf\s*(?:口红|汤姆\s*福特)/gi, 'TF口红'],
   ]
   const matchedBeauty = matchProduct(beautyPatterns)
   if (matchedBeauty) {
@@ -762,7 +765,7 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 9. 酒水系列 =====
+  // 酒水
   const winePatterns: [string | RegExp, string][] = [
     [/飞天\s*茅台/gi, '飞天茅台'],
     [/(?:贵州\s*)?茅台/gi, '茅台'],
@@ -770,10 +773,6 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     [/泸州老窖/gi, '泸州老窖'],
     [/汾酒/gi, '汾酒'],
     [/洋河\s*(?:梦之蓝|海之蓝)/gi, '洋河'],
-    [/国窖\s*1573/gi, '国窖1573'],
-    [/郎酒/gi, '郎酒'],
-    [/剑南春/gi, '剑南春'],
-    [/水井坊/gi, '水井坊'],
   ]
   const matchedWine = matchProduct(winePatterns)
   if (matchedWine) {
@@ -786,19 +785,16 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 10. 母婴用品 =====
+  // 母婴
   const babyPatterns: [string | RegExp, string][] = [
     [/爱他美/gi, '爱他美奶粉'],
     [/美素佳儿/gi, '美素佳儿'],
-    [/惠氏\s*(?:启赋)?/gi, '惠氏'],
-    [/雅培\s*(?:菁智)?/gi, '雅培'],
+    [/惠氏/gi, '惠氏'],
+    [/雅培/gi, '雅培'],
     [/美赞臣/gi, '美赞臣'],
-    [/a2\s*(?:奶粉)?/gi, 'A2奶粉'],
     [/花王\s*(?:纸尿裤)?/gi, '花王纸尿裤'],
-    [/好奇\s*(?:铂金)?/gi, '好奇纸尿裤'],
-    [/大王\s*(?:天使)?/gi, '大王纸尿裤'],
+    [/好奇/gi, '好奇纸尿裤'],
     [/帮宝适/gi, '帮宝适'],
-    [/贝亲\s*(?:奶瓶)?/gi, '贝亲'],
   ]
   const matchedBaby = matchProduct(babyPatterns)
   if (matchedBaby) {
@@ -811,44 +807,34 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
     }
   }
 
-  // ===== 11. 食品饮料 =====
+  // 食品饮料
   const foodPatterns: [string | RegExp, string][] = [
-    [/农夫山泉(?:\s*(?:4L|5L|550ml|1.5L))?/gi, '农夫山泉'],
-    [/农夫果园/gi, '农夫果园'],
+    [/农夫山泉/gi, '农夫山泉'],
     [/可口可乐/gi, '可口可乐'],
     [/百事可乐/gi, '百事可乐'],
     [/元气森林/gi, '元气森林'],
     [/娃哈哈/gi, '娃哈哈'],
-    [/怡宝/gi, '怡宝'],
-    [/康师傅(?:\s*方便面)?/gi, '康师傅'],
-    [/统一\s*方便面/gi, '统一方便面'],
-    [/今麦郎/gi, '今麦郎'],
-    [/旺旺(?:\s*(?:雪饼|仙贝|小馒头))?/gi, '旺旺'],
+    [/康师傅/gi, '康师傅'],
     [/奥利奥/gi, '奥利奥'],
     [/德芙/gi, '德芙巧克力'],
     [/费列罗/gi, '费列罗'],
-    [/乐事(?:\s*薯片)?/gi, '乐事薯片'],
-    [/可比克/gi, '可比克'],
-    [/良品铺子/gi, '良品铺子'],
-    [/三只松鼠/gi, '三只松鼠'],
-    [/伊利(?:\s*(?:纯牛奶|酸奶|金典|安慕希))?/gi, '伊利'],
-    [/蒙牛(?:\s*(?:纯牛奶|酸奶|特仑苏))?/gi, '蒙牛'],
-    [/光明(?:\s*(?:纯牛奶|酸奶))?/gi, '光明'],
+    [/乐事\s*薯片/gi, '乐事薯片'],
+    [/伊利/gi, '伊利'],
+    [/蒙牛/gi, '蒙牛'],
   ]
   const matchedFood = matchProduct(foodPatterns)
   if (matchedFood) {
     return {
       name: matchedFood,
-      brand: matchedFood.includes('可乐') ? '可口可乐' : matchedFood.includes('伊利') ? '伊利' : matchedFood.includes('蒙牛') ? '蒙牛' : '食品',
-      category: matchedFood.includes('可乐') || matchedFood.includes('农夫') || matchedFood.includes('娃哈哈') || matchedFood.includes('元气') || matchedFood.includes('怡宝') ? '饮料' : '食品',
+      brand: '食品饮料',
+      category: '食品',
       confidence: Math.min(confidence / 100 + 0.1, 1),
       matchedBy: '食品饮料'
     }
   }
 
-  // ===== 12. 使用关键词匹配（兜底）=====
+  // 关键词匹配
   if (productKeywords.length > 0) {
-    // 识别品牌
     let brand = ''
     for (const [key, value] of Object.entries(brandMap)) {
       if (cleanText.includes(key.toLowerCase()) || cleanWords.includes(key.toLowerCase())) {
@@ -857,39 +843,15 @@ export function generateProductNameFromOcr(ocrResult: OcrResult): {
       }
     }
     
-    // 识别分类
-    let category = '综合'
-    for (const [cat, keywords] of Object.entries(categoryMap)) {
-      for (const kw of keywords) {
-        if (cleanText.includes(kw.toLowerCase())) {
-          category = cat
-          break
-        }
-      }
-    }
-    
     return {
       name: productKeywords[0],
       brand: brand || '未知',
-      category: category,
-      confidence: Math.min(confidence / 100, 0.5), // 关键词匹配降低置信度
+      category: '综合',
+      confidence: Math.min(confidence / 100, 0.5),
       matchedBy: '关键词'
     }
   }
 
-  // ===== 13. 最终兜底：提取数字和字母尝试识别 =====
-  const alphanumericMatch = text.match(/([a-zA-Z]{3,}\s*\d+[a-zA-Z]?|\d+[a-zA-Z]\s*[a-zA-Z]+)/i)
-  if (alphanumericMatch) {
-    return {
-      name: alphanummericMatch[1].toUpperCase(),
-      brand: '未知',
-      category: '综合',
-      confidence: 0.3,
-      matchedBy: '字母数字'
-    }
-  }
-
-  // 无法识别
   return {
     name: '未知商品',
     brand: '',
