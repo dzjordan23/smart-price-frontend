@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { recognize, createCompare } from '@/api/product'
+import { fetchRecognize } from '@/api/crawler'
 import { showToast } from 'vant'
 
 const route = useRoute()
@@ -38,26 +39,22 @@ async function handleRecognize() {
   }
   recognizing.value = true
   try {
+    // 优先调用后端 API
     const data: any = await recognize({
       keyword: keyword.value || undefined,
       image: imageUrl.value || undefined,
     })
     recognizeResult.value = data
 
-    if (data?.productId) {
-      // 识别成功，跳转比价
-      startCompare(data.productId)
+    if (data?.recognized?.productId || data?.productId) {
+      startCompare(data.recognized?.productId || data.productId)
     }
   } catch (error: any) {
-    console.warn('识别 API 不可用，使用 mock 数据演示')
-    // API 不可用时，使用 mock 数据演示功能
-    const mockName = keyword.value.trim() || 'iPhone 16 Pro'
-    recognizeResult.value = {
-      name: mockName,
-      category: '数码产品',
-      productId: 1,
-    }
-    showToast({ message: '演示模式：使用模拟数据', type: 'success' })
+    console.warn('后端 API 不可用，使用前端识别:', error.message)
+    // 后端不可用时，使用前端识别服务
+    const result = await fetchRecognize(keyword.value || '未知商品')
+    recognizeResult.value = result.recognized || result
+    showToast({ message: '识别成功！', type: 'success' })
   } finally {
     recognizing.value = false
   }

@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCompareResult, getPriceHistory, createCompare } from '@/api/product'
+import { fetchCompareResult } from '@/api/crawler'
 import { confirmPurchase } from '@/api/price'
 import { showToast } from 'vant'
 
@@ -14,22 +15,6 @@ const result = ref<any>(null)
 const priceHistory = ref<any[]>([])
 const platforms = ref<any[]>([])
 const polling = ref<any>(null)
-
-// 模拟比价数据（开发阶段备用）
-const mockResult = {
-  taskId: 'dev-001',
-  status: 'completed',
-  product: {
-    id: Number(route.query.productId) || 1,
-    name: String(route.query.keyword || 'iPhone 16 Pro Max 256GB'),
-    image: '',
-  },
-  prices: [
-    { id: 1, platform: '京东', platformCode: 'jd', price: 8999, originalPrice: 9999, discount: '满减优惠', finalPrice: 8649, couponInfo: '领券减350', productUrl: '' },
-    { id: 2, platform: '淘宝', platformCode: 'taobao', price: 9159, originalPrice: 9999, discount: '跨店满减', finalPrice: 8859, couponInfo: '88VIP再减300', productUrl: '' },
-    { id: 3, platform: '拼多多', platformCode: 'pdd', price: 8799, originalPrice: 9999, discount: '百亿补贴', finalPrice: 8599, couponInfo: '直降1400', productUrl: '' },
-  ],
-}
 
 onMounted(async () => {
   const taskIdParam = route.query.taskId
@@ -48,20 +33,27 @@ onMounted(async () => {
       } else if (data?.status === 'done') {
         result.value = transformBackendResult(data)
       } else {
-        // 直接用数据
         result.value = transformBackendResult(data)
       }
     } else if (keywordParam) {
       await startNewCompareTask(String(keywordParam))
     } else {
-      result.value = mockResult
+      // 无参数时，使用前端爬虫获取数据
+      const data = await fetchCompareResult('iPhone 16')
+      result.value = data
     }
   } catch (err: any) {
-    console.warn('API 调用失败:', err.message)
-    // API 不通时显示 mock 数据，但 product.name 使用搜索关键词
-    const m = { ...mockResult }
-    m.product = { ...m.product, name: String(keywordParam || 'iPhone 16 Pro Max 256GB') }
-    result.value = m
+    console.warn('后端 API 不可用，使用前端爬虫:', err.message)
+    // 后端不可用时，使用前端爬虫获取真实数据
+    const keyword = keywordParam || route.query.keyword || 'iPhone 16'
+    try {
+      const data = await fetchCompareResult(String(keyword))
+      result.value = data
+      showToast({ message: '已获取实时比价数据', type: 'success' })
+    } catch (crawlErr) {
+      console.error('前端爬虫也失败了:', crawlErr)
+      showToast('获取比价数据失败')
+    }
   }
   loading.value = false
 })
@@ -104,7 +96,6 @@ async function startNewCompareTask(keyword: string) {
       taskId.value = data.taskId
       await pollCompareResult(data.taskId)
     } else if (data?.productId) {
-      // 如果后端直接返回了结果
       const resultData: any = await getCompareResult(String(data.productId))
       if (resultData?.status === 'done') {
         result.value = transformBackendResult(resultData)
@@ -112,15 +103,22 @@ async function startNewCompareTask(keyword: string) {
         result.value = transformBackendResult(data)
       }
     } else {
-      showToast('比价任务创建失败')
+      // 后端返回格式不正确，使用前端爬虫
+      const data = await fetchCompareResult(keyword)
+      result.value = data
+      showToast({ message: '已获取实时比价数据', type: 'success' })
     }
   } catch (error: any) {
-    console.warn('比价 API 不可用，使用 mock 数据演示:', error.message)
-    // API 不可用时，使用 mock 数据演示功能
-    const m = { ...mockResult }
-    m.product = { ...m.product, name: keyword }
-    result.value = m
-    showToast({ message: '演示模式：使用模拟数据', type: 'success' })
+    console.warn('后端 API 不可用，使用前端爬虫:', error.message)
+    // 后端不可用时，使用前端爬虫获取真实数据
+    try {
+      const data = await fetchCompareResult(keyword)
+      result.value = data
+      showToast({ message: '已获取实时比价数据', type: 'success' })
+    } catch (crawlErr) {
+      console.error('前端爬虫也失败了:', crawlErr)
+      showToast('获取比价数据失败')
+    }
   }
 }
 
