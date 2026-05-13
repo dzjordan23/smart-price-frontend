@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getCompareResult, getPriceHistory, createCompare } from '@/api/product'
 import { fetchCompareResult } from '@/api/crawler'
 import { confirmPurchase } from '@/api/price'
 import { showToast } from 'vant'
@@ -10,148 +9,40 @@ const route = useRoute()
 const router = useRouter()
 
 const loading = ref(true)
-const taskId = ref('')
 const result = ref<any>(null)
-const priceHistory = ref<any[]>([])
-const platforms = ref<any[]>([])
-const polling = ref<any>(null)
 
 onMounted(async () => {
-  const taskIdParam = route.query.taskId
-  const productIdParam = route.query.productId
-  const keywordParam = route.query.keyword
+  const keywordParam = route.query.keyword as string
+  const productIdParam = route.query.productId as string
+
+  if (!keywordParam && !productIdParam) {
+    // 无参数时，显示提示
+    showToast('请从商品识别页进入比价')
+    loading.value = false
+    return
+  }
 
   try {
-    if (taskIdParam) {
-      taskId.value = String(taskIdParam)
-      await pollCompareResult(taskId.value)
-    } else if (productIdParam) {
-      const data: any = await getCompareResult(String(productIdParam))
-      if (data?.status === 'processing') {
-        taskId.value = data.taskId || String(productIdParam)
-        await pollCompareResult(taskId.value)
-      } else if (data?.status === 'done') {
-        result.value = transformBackendResult(data)
-      } else {
-        result.value = transformBackendResult(data)
-      }
-    } else if (keywordParam) {
-      await startNewCompareTask(String(keywordParam))
-    } else {
-      // 无参数时，使用前端爬虫获取数据
-      const data = await fetchCompareResult('iPhone 16')
-      result.value = data
-    }
+    // 直接使用前端爬虫获取数据
+    const keyword = keywordParam || 'iPhone 16'
+    const data = await fetchCompareResult(keyword)
+    result.value = data
+    showToast({ message: '已获取实时比价数据', type: 'success' })
   } catch (err: any) {
-    console.warn('后端 API 不可用，使用前端爬虫:', err.message)
-    // 后端不可用时，使用前端爬虫获取真实数据
-    const keyword = keywordParam || route.query.keyword || 'iPhone 16'
-    try {
-      const data = await fetchCompareResult(String(keyword))
-      result.value = data
-      showToast({ message: '已获取实时比价数据', type: 'success' })
-    } catch (crawlErr) {
-      console.error('前端爬虫也失败了:', crawlErr)
-      showToast('获取比价数据失败')
-    }
+    console.error('获取比价数据失败:', err)
+    showToast({ message: '获取比价数据失败', type: 'fail' })
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 })
 
-// 轮询比价结果
-async function pollCompareResult(tid: string) {
-  return new Promise<void>((resolve) => {
-    polling.value = setInterval(async () => {
-      try {
-        const data: any = await getCompareResult(tid)
-        if (data?.status === 'done') {
-          result.value = transformBackendResult(data)
-          clearInterval(polling.value)
-          loading.value = false
-          resolve()
-        } else if (data?.status === 'failed') {
-          clearInterval(polling.value)
-          loading.value = false
-          showToast('比价失败，请重试')
-          resolve()
-        }
-        // processing 状态继续轮询
-      } catch {
-        clearInterval(polling.value)
-        loading.value = false
-        resolve()
-      }
-    }, 3000)
-  })
-}
-
-// 创建新的比价任务
-async function startNewCompareTask(keyword: string) {
-  try {
-    const data: any = await createCompare({
-      keyword: keyword,
-      platforms: ['jd', 'pdd', 'taobao', 'douyin'],
-    })
-    if (data?.taskId) {
-      taskId.value = data.taskId
-      await pollCompareResult(data.taskId)
-    } else if (data?.productId) {
-      const resultData: any = await getCompareResult(String(data.productId))
-      if (resultData?.status === 'done') {
-        result.value = transformBackendResult(resultData)
-      } else {
-        result.value = transformBackendResult(data)
-      }
-    } else {
-      // 后端返回格式不正确，使用前端爬虫
-      const data = await fetchCompareResult(keyword)
-      result.value = data
-      showToast({ message: '已获取实时比价数据', type: 'success' })
-    }
-  } catch (error: any) {
-    console.warn('后端 API 不可用，使用前端爬虫:', error.message)
-    // 后端不可用时，使用前端爬虫获取真实数据
-    try {
-      const data = await fetchCompareResult(keyword)
-      result.value = data
-      showToast({ message: '已获取实时比价数据', type: 'success' })
-    } catch (crawlErr) {
-      console.error('前端爬虫也失败了:', crawlErr)
-      showToast('获取比价数据失败')
-    }
-  }
-}
-
-// 转换后端数据格式为前端期望格式
-function transformBackendResult(data: any) {
-  if (!data) return mockResult
-  return {
-    taskId: data.taskId || '',
-    status: 'completed',
-    product: data.product || { name: route.query.keyword || '商品', id: 0 },
-    prices: (data.results || []).map((r: any, idx: number) => ({
-      id: idx + 1,
-      platform: r.platformName || r.platform || '',
-      platformCode: r.platform || '',
-      price: r.finalPrice || r.salePrice || 0,
-      originalPrice: r.originalPrice || 0,
-      discount: r.promotion || '',
-      finalPrice: r.finalPrice || 0,
-      couponInfo: r.couponInfo?.type ? `${r.couponInfo.type}: ${r.couponInfo.amount}` : '',
-      productUrl: r.productUrl || '',
-      shopName: r.shopName || '',
-      isLowest: r.isLowest || false,
-    })),
-  }
-}
-
 onUnmounted(() => {
-  if (polling.value) clearInterval(polling.value)
+  // 清理工作
 })
 
 // 排序价格
 const sortedPrices = computed(() => {
-  const prices = result.value?.prices || []
+  const prices = result.value?.results || result.value?.prices || []
   return [...prices].sort((a, b) => (a.finalPrice || a.price) - (b.finalPrice || b.price))
 })
 
@@ -159,8 +50,8 @@ const sortedPrices = computed(() => {
 async function handleBuy(item: any) {
   try {
     await confirmPurchase(
-      result.value.product.id,
-      item.id,
+      result.value?.product?.id || 0,
+      item.id || 0,
       item.platform,
     )
     showToast({ message: '购买记录已提交', type: 'success' })
@@ -172,7 +63,17 @@ async function handleBuy(item: any) {
 function getPlatformColor(platform: string) {
   if (platform.includes('京东')) return '#e4393c'
   if (platform.includes('淘宝') || platform.includes('天猫')) return '#ff5722'
-  return '#e02e24'
+  if (platform.includes('拼多多')) return '#e02e24'
+  if (platform.includes('抖音')) return '#00f2ea'
+  return '#e4393c'
+}
+
+function getPlatformIcon(platform: string) {
+  if (platform.includes('京东')) return 'JD'
+  if (platform.includes('淘宝') || platform.includes('天猫')) return 'TB'
+  if (platform.includes('拼多多')) return 'PDD'
+  if (platform.includes('抖音')) return 'DY'
+  return platform.slice(0, 2)
 }
 
 // 计算省钱金额
@@ -182,12 +83,19 @@ function savedAmount(item: any) {
   return Math.max(0, orig - final)
 }
 
+// 计算折扣比例
+function discountRate(item: any) {
+  const orig = item.originalPrice || item.price
+  const final = item.finalPrice || item.price
+  if (orig === 0) return 0
+  return Math.round((1 - final / orig) * 100)
+}
+
 // 跳转购买
 function goToBuy(item: any) {
   if (item.productUrl) {
     window.location.href = item.productUrl
   } else {
-    // 构造平台搜索链接
     const keyword = encodeURIComponent(result.value?.product?.name || '')
     const platformUrls: Record<string, string> = {
       jd: `https://search.jd.com/Search?keyword=${keyword}`,
@@ -195,7 +103,7 @@ function goToBuy(item: any) {
       pdd: `https://mobile.yangkeduo.com/search_result.html?search_key=${keyword}`,
       douyin: `https://v.douyin.com/search?keyword=${keyword}`,
     }
-    window.location.href = platformUrls[item.platformCode] || platformUrls.jd
+    window.location.href = platformUrls[item.platform] || platformUrls.jd
   }
 }
 
@@ -204,6 +112,15 @@ const lowestPrice = computed(() => {
   if (!sortedPrices.value.length) return 0
   return Math.min(...sortedPrices.value.map((p: any) => p.finalPrice || p.price))
 })
+
+// 获取平台图标背景色
+function getIconBg(platform: string) {
+  if (platform.includes('京东')) return 'linear-gradient(135deg, #e4393c, #c62828)'
+  if (platform.includes('淘宝') || platform.includes('天猫')) return 'linear-gradient(135deg, #ff5722, #e64a19)'
+  if (platform.includes('拼多多')) return 'linear-gradient(135deg, #e02e24, #c62828)'
+  if (platform.includes('抖音')) return 'linear-gradient(135deg, #00f2ea, #00c4cc)'
+  return 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))'
+}
 </script>
 
 <template>
@@ -212,22 +129,41 @@ const lowestPrice = computed(() => {
 
     <!-- 商品信息 -->
     <div v-if="result?.product" class="product-header card glow-border">
-      <div class="product-name">{{ result.product.name }}</div>
+      <div class="product-info">
+        <div class="product-name">{{ result.product.name }}</div>
+        <div class="product-summary" v-if="result.summary">
+          <span class="summary-item">
+            <van-icon name="flag-o" />
+            {{ result.summary.platformCount }}个平台
+          </span>
+          <span class="summary-item highlight">
+            <van-icon name="paid" />
+            最低 ¥{{ result.summary.lowestPrice }}
+          </span>
+        </div>
+      </div>
       <div class="compare-status">
-        <van-tag v-if="result.status === 'completed'" type="success" round>比价完成</van-tag>
-        <van-tag v-else type="warning" round>比价中...</van-tag>
+        <van-tag type="success" round>
+          <van-icon name="passed" /> 比价完成
+        </van-tag>
       </div>
     </div>
 
     <!-- 比价结果 -->
-    <van-loading v-if="loading" class="center-loading" />
+    <van-loading v-if="loading" class="center-loading">
+      <span class="loading-text">正在获取实时价格...</span>
+    </van-loading>
 
     <div v-else class="price-list">
-      <h3 class="section-title"><span class="dot"></span>全网比价结果</h3>
+      <h3 class="section-title">
+        <span class="dot"></span>
+        全网比价结果
+        <span class="result-count">({{ sortedPrices.length }}个平台)</span>
+      </h3>
 
       <div
         v-for="(item, index) in sortedPrices"
-        :key="item.id"
+        :key="index"
         class="price-card card"
         :class="{ lowest: (item.finalPrice || item.price) === lowestPrice }"
       >
@@ -236,50 +172,81 @@ const lowestPrice = computed(() => {
           #{{ index + 1 }}
         </div>
 
+        <!-- 平台图标 -->
+        <div class="platform-icon" :style="{ background: getIconBg(item.platformName || item.platform) }">
+          {{ getPlatformIcon(item.platformName || item.platform) }}
+        </div>
+
         <div class="price-info">
           <div class="platform-row">
-            <span class="platform-name" :style="{ color: getPlatformColor(item.platform) }">
-              {{ item.platform }}
+            <span class="platform-name" :style="{ color: getPlatformColor(item.platformName || item.platform) }">
+              {{ item.platformName || item.platform }}
             </span>
-            <van-tag v-if="item.discount" type="primary" plain size="small">
-              {{ item.discount }}
-            </van-tag>
+            <span class="shop-name" v-if="item.shopName">{{ item.shopName }}</span>
           </div>
 
           <div class="price-row">
             <span class="final-price">¥{{ item.finalPrice || item.price }}</span>
-            <span v-if="item.originalPrice" class="original-price">
+            <span v-if="item.originalPrice && item.originalPrice > (item.finalPrice || item.price)" class="original-price">
               ¥{{ item.originalPrice }}
             </span>
-            <span v-if="savedAmount(item) > 0" class="saved-tag">
-              省¥{{ savedAmount(item) }}
+            <span v-if="discountRate(item) > 0" class="discount-tag">
+              {{ discountRate(item) }}%OFF
             </span>
           </div>
 
-          <div v-if="item.couponInfo" class="coupon-info">
-            🎫 {{ item.couponInfo }}
+          <div class="promotion-row" v-if="item.discount || item.couponInfo">
+            <van-tag v-if="item.discount" type="warning" plain size="small">
+              {{ item.discount }}
+            </van-tag>
+            <van-tag v-if="item.couponInfo" type="danger" plain size="small">
+              {{ item.couponInfo }}
+            </van-tag>
           </div>
         </div>
 
-        <van-button
-          size="small"
-          round
-          type="primary"
-          class="buy-btn"
-          @click="goToBuy(item)"
-        >
-          去购买
-        </van-button>
+        <div class="action-col">
+          <van-button
+            size="small"
+            round
+            type="primary"
+            class="buy-btn"
+            @click="goToBuy(item)"
+          >
+            去购买
+          </van-button>
+          <span v-if="savedAmount(item) > 0" class="saved-amount">
+            省¥{{ savedAmount(item) }}
+          </span>
+        </div>
       </div>
 
       <!-- 空状态 -->
-      <van-empty v-if="!loading && sortedPrices.length === 0" description="暂无比价结果" />
+      <van-empty v-if="sortedPrices.length === 0" description="暂无比价结果，请尝试其他商品" />
     </div>
 
-    <!-- 降价提醒入口 -->
+    <!-- 价格走势入口 -->
     <div v-if="result?.product" class="watch-entry card" @click="$router.push('/watchlist')">
-      <span>📊 查看价格历史走势</span>
-      <van-icon name="arrow" />
+      <span class="entry-icon">📊</span>
+      <span class="entry-text">查看价格历史走势</span>
+      <van-icon name="arrow" class="entry-arrow" />
+    </div>
+
+    <!-- 热门商品推荐 -->
+    <div class="recommendations card" v-if="sortedPrices.length > 0">
+      <h4>试试其他热门商品</h4>
+      <div class="recommend-tags">
+        <van-tag
+          v-for="item in ['iPhone 15', 'MacBook Pro', '华为Pura70', '戴森吸尘器', 'Switch游戏机']"
+          :key="item"
+          size="medium"
+          round
+          class="recommend-tag"
+          @click="$router.push({ name: 'Compare', query: { keyword: item } })"
+        >
+          {{ item }}
+        </van-tag>
+      </div>
     </div>
   </div>
 </template>
@@ -292,14 +259,44 @@ const lowestPrice = computed(() => {
 .product-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: $spacing-lg;
+  gap: $spacing-md;
+}
+
+.product-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .product-name {
   font-size: $font-lg;
   font-weight: 600;
-  flex: 1;
+  margin-bottom: $spacing-xs;
+  line-height: 1.4;
+}
+
+.product-summary {
+  display: flex;
+  gap: $spacing-md;
+  font-size: $font-sm;
+  color: var(--text-secondary);
+
+  .summary-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .highlight {
+    color: var(--color-up);
+    font-weight: 600;
+  }
+}
+
+.loading-text {
+  color: var(--text-secondary);
+  margin-left: $spacing-sm;
 }
 
 .price-list {
@@ -320,6 +317,12 @@ const lowestPrice = computed(() => {
     background: var(--color-primary);
     border-radius: 2px;
   }
+
+  .result-count {
+    font-size: $font-sm;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
 }
 
 .price-card {
@@ -332,6 +335,7 @@ const lowestPrice = computed(() => {
   &.lowest {
     border-color: var(--color-primary);
     box-shadow: 0 0 20px var(--color-primary-glow);
+    background: linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.05), transparent);
   }
 
   &:active { transform: scale(0.98); }
@@ -340,13 +344,26 @@ const lowestPrice = computed(() => {
 .rank {
   font-size: $font-xl;
   font-weight: 800;
-  width: 40px;
+  width: 36px;
   text-align: center;
   flex-shrink: 0;
 
   &.rank-1 { color: #ffd700; text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
   &.rank-2 { color: #c0c0c0; }
   &.rank-3 { color: #cd7f32; }
+}
+
+.platform-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: $font-xs;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .price-info {
@@ -358,7 +375,8 @@ const lowestPrice = computed(() => {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  margin-bottom: $spacing-xs;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 
 .platform-name {
@@ -366,11 +384,19 @@ const lowestPrice = computed(() => {
   font-size: $font-md;
 }
 
+.shop-name {
+  font-size: $font-xs;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .price-row {
   display: flex;
   align-items: baseline;
   gap: $spacing-sm;
-  margin-bottom: $spacing-xs;
+  margin-bottom: 4px;
 }
 
 .final-price {
@@ -385,29 +411,48 @@ const lowestPrice = computed(() => {
   text-decoration: line-through;
 }
 
-.saved-tag {
+.discount-tag {
   font-size: $font-xs;
-  color: var(--color-success);
-  background: rgba(16, 185, 129, 0.1);
+  color: var(--color-down);
+  background: rgba(239, 68, 68, 0.1);
   padding: 2px 6px;
   border-radius: 4px;
+  font-weight: 600;
 }
 
-.coupon-info {
-  font-size: $font-xs;
-  color: var(--color-warning);
+.promotion-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.action-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .buy-btn {
-  flex-shrink: 0;
   background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   border: none;
+  min-width: 70px;
+}
+
+.saved-amount {
+  font-size: $font-xs;
+  color: var(--color-success);
+  white-space: nowrap;
 }
 
 .center-loading {
   display: flex;
   justify-content: center;
   padding: 60px 0;
+  flex-direction: column;
+  align-items: center;
+  gap: $spacing-md;
 }
 
 .watch-entry {
@@ -415,6 +460,47 @@ const lowestPrice = computed(() => {
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
+  margin-top: $spacing-md;
+  padding: $spacing-md $spacing-lg;
+}
+
+.entry-icon {
+  font-size: $font-xl;
+}
+
+.entry-text {
+  flex: 1;
+  margin-left: $spacing-sm;
   color: var(--text-secondary);
+}
+
+.entry-arrow {
+  color: var(--text-muted);
+}
+
+.recommendations {
+  margin-top: $spacing-lg;
+
+  h4 {
+    font-size: $font-md;
+    color: var(--text-secondary);
+    margin-bottom: $spacing-md;
+  }
+}
+
+.recommend-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.recommend-tag {
+  cursor: pointer;
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px var(--color-primary-glow);
+  }
 }
 </style>

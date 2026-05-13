@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { recognize, createCompare } from '@/api/product'
-import { fetchRecognize } from '@/api/crawler'
+import { fetchRecognize, fetchCompareResult } from '@/api/crawler'
 import { showToast } from 'vant'
 
 const route = useRoute()
@@ -31,38 +30,50 @@ function handleChooseImage() {
   input.click()
 }
 
-// 识别商品
+// 识别商品 - 直接使用前端爬虫
 async function handleRecognize() {
   if (!keyword.value.trim() && !imageUrl.value) {
     showToast('请输入商品名称或拍照')
     return
   }
+
   recognizing.value = true
   try {
-    // 优先调用后端 API
-    const data: any = await recognize({
-      keyword: keyword.value || undefined,
-      image: imageUrl.value || undefined,
-    })
-    recognizeResult.value = data
-
-    if (data?.recognized?.productId || data?.productId) {
-      startCompare(data.recognized?.productId || data.productId)
-    }
-  } catch (error: any) {
-    console.warn('后端 API 不可用，使用前端识别:', error.message)
-    // 后端不可用时，使用前端识别服务
+    // 直接使用前端识别服务（更可靠）
     const result = await fetchRecognize(keyword.value || '未知商品')
     recognizeResult.value = result.recognized || result
-    showToast({ message: '识别成功！', type: 'success' })
+
+    // 识别成功后自动开始比价
+    if (recognizeResult.value?.name) {
+      showToast({ message: '识别成功，正在获取比价...', type: 'success' })
+      // 跳转到比价页面
+      setTimeout(() => {
+        router.push({
+          name: 'Compare',
+          query: { keyword: recognizeResult.value.name }
+        })
+      }, 500)
+    }
+  } catch (error: any) {
+    console.error('识别失败:', error)
+    showToast({ message: '识别失败，请重试', type: 'fail' })
   } finally {
     recognizing.value = false
   }
 }
 
-// 开始比价
-async function startCompare(productId: number) {
-  router.push({ name: 'Compare', query: { productId: String(productId) } })
+// 手动开始比价
+async function startCompare(productName?: string) {
+  const name = productName || recognizeResult.value?.name || keyword.value
+  if (!name) {
+    showToast('请先识别商品')
+    return
+  }
+
+  router.push({
+    name: 'Compare',
+    query: { keyword: name }
+  })
 }
 </script>
 
@@ -88,7 +99,7 @@ async function startCompare(productId: number) {
     <div class="keyword-input card">
       <van-field
         v-model="keyword"
-        placeholder="或直接输入商品名称"
+        placeholder="输入商品名称，如: iPhone 16、小米14、戴森吹风机"
         size="large"
         clearable
         left-icon="search"
@@ -118,22 +129,50 @@ async function startCompare(productId: number) {
           <span class="label">商品名称</span>
           <span class="value">{{ recognizeResult.name }}</span>
         </div>
+        <div v-if="recognizeResult.brand" class="result-row">
+          <span class="label">品牌</span>
+          <span class="value brand-tag">{{ recognizeResult.brand }}</span>
+        </div>
         <div v-if="recognizeResult.category" class="result-row">
           <span class="label">分类</span>
           <span class="value">{{ recognizeResult.category }}</span>
         </div>
+        <div v-if="recognizeResult.spec" class="result-row">
+          <span class="label">规格</span>
+          <span class="value">{{ recognizeResult.spec }}</span>
+        </div>
+        <div class="result-row">
+          <span class="label">识别置信度</span>
+          <span class="value confidence">{{ (recognizeResult.confidence * 100).toFixed(0) }}%</span>
+        </div>
       </div>
       <van-button
-        v-if="recognizeResult.productId"
         type="primary"
         round
         block
         size="small"
         class="compare-btn"
-        @click="startCompare(recognizeResult.productId)"
+        @click="startCompare()"
       >
         全网比价 →
       </van-button>
+    </div>
+
+    <!-- 热门商品快捷入口 -->
+    <div class="quick-entry card">
+      <h4>热门商品</h4>
+      <div class="quick-tags">
+        <van-tag
+          v-for="item in ['iPhone 16', 'MacBook Air', '华为Mate60', '戴森吹风机', 'Switch']"
+          :key="item"
+          size="large"
+          round
+          class="quick-tag"
+          @click="keyword = item; handleRecognize()"
+        >
+          {{ item }}
+        </van-tag>
+      </div>
     </div>
   </div>
 </template>
@@ -221,10 +260,47 @@ async function startCompare(productId: number) {
 
   .label { color: var(--text-secondary); }
   .value { color: var(--text-primary); font-weight: 500; }
+  .brand-tag {
+    background: var(--color-primary);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: $font-xs;
+  }
+  .confidence {
+    color: var(--color-success);
+    font-weight: 600;
+  }
 }
 
 .compare-btn {
   background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   border: none;
+}
+
+.quick-entry {
+  margin-top: $spacing-xl;
+
+  h4 {
+    font-size: $font-md;
+    margin-bottom: $spacing-md;
+    color: var(--text-secondary);
+  }
+}
+
+.quick-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.quick-tag {
+  cursor: pointer;
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px var(--color-primary-glow);
+  }
 }
 </style>
