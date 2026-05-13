@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showLoadingToast, closeToast } from 'vant'
 import { useAuthStore } from '@/stores/auth'
-import { login } from '@/api/auth'
+import { login, isWxBrowser, getCurrentPageUrl, handleSilentAuthCallback } from '@/api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -12,13 +12,7 @@ const authStore = useAuthStore()
 const testCode = ref('')
 const loading = ref(false)
 
-// 检查是否在微信浏览器中
-function isWxBrowser() {
-  const ua = navigator.userAgent.toLowerCase()
-  return ua.includes('micromessenger')
-}
-
-// 处理微信 OAuth 回调
+// 处理微信授权回调
 async function handleWxCallback() {
   const code = route.query.code as string
   const state = route.query.state as string
@@ -26,17 +20,25 @@ async function handleWxCallback() {
   if (code) {
     showLoadingToast({ message: '微信授权中...', duration: 0 })
     try {
-      const success = await authStore.wxLogin(code)
-      closeToast()
-      if (success) {
+      const result: any = await handleSilentAuthCallback(code, state)
+      if (result?.token) {
+        authStore.setToken(result.token)
+        if (result.user) {
+          authStore.setUserInfo(result.user)
+        } else {
+          await authStore.fetchUserInfo()
+        }
+        closeToast()
         showToast({ message: '登录成功', type: 'success' })
         const redirect = (route.query.redirect as string) || '/'
         router.replace(redirect)
       } else {
+        closeToast()
         showToast({ message: '授权失败，请重试', type: 'fail' })
       }
     } catch (error) {
       closeToast()
+      console.error('授权失败:', error)
       showToast({ message: '授权失败，请重试', type: 'fail' })
     }
   }
@@ -44,24 +46,36 @@ async function handleWxCallback() {
 
 // 微信环境下发起静默授权
 async function initWxAuth() {
-  if (!isWxBrowser()) return
-
   const code = route.query.code as string
+  
   if (code) {
     // 已经有 code，处理回调
     await handleWxCallback()
   } else {
-    // 没有 code，发起静默授权
-    showLoadingToast({ message: '正在跳转微信授权...', duration: 0 })
+    // 没有 code，需要先获取授权 URL
+    showLoadingToast({ message: '正在获取授权...', duration: 0 })
+    
     try {
-      const res: any = await import('@/api/auth').then(m => m.silentAuth(window.location.href.split('?')[0]))
+      // 动态导入避免循环依赖
+      const { silentAuth } = await import('@/api/auth')
+      const currentUrl = getCurrentPageUrl()
+      const redirect = (route.query.redirect as string) || '/'
+      const callbackUrl = `${currentUrl}?redirect=${encodeURIComponent(redirect)}`
+      
+      const res: any = await silentAuth(callbackUrl)
       closeToast()
-      if (res?.authorizeUrl) {
-        window.location.href = res.authorizeUrl
+      
+      if (res?.url) {
+        console.log('跳转到微信授权:', res.url)
+        // 跳转到微信授权页面
+        window.location.href = res.url
+      } else {
+        showToast({ message: '获取授权链接失败', type: 'fail' })
       }
-    } catch (error) {
+    } catch (error: any) {
       closeToast()
-      console.warn('微信授权跳转失败，使用开发模式')
+      console.error('获取授权失败:', error)
+      showToast({ message: '微信授权暂不可用，请使用其他方式登录', type: 'fail' })
     }
   }
 }
