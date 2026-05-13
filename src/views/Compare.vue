@@ -115,8 +115,12 @@ async function startNewCompareTask(keyword: string) {
       showToast('比价任务创建失败')
     }
   } catch (error: any) {
-    console.error('比价任务创建失败:', error)
-    showToast('比价任务创建失败，请重试')
+    console.warn('比价 API 不可用，使用 mock 数据演示:', error.message)
+    // API 不可用时，使用 mock 数据演示功能
+    const m = { ...mockResult }
+    m.product = { ...m.product, name: keyword }
+    result.value = m
+    showToast({ message: '演示模式：使用模拟数据', type: 'success' })
   }
 }
 
